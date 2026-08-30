@@ -1,0 +1,21 @@
+[package]
+name = "rift"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "A GPUI file manager"
+
+[dependencies]
+anyhow = "1"
+chrono = "0.4"
+flexi_logger = { version = "0.31", features = ["colors"] }
+log = "0.4"
+gpui = { workspace = true }
+gpui_effects = { workspace = true }
+gpui_platform = { workspace = true, features = ["wayland", "x11"] }
+image = { workspace = true }
+rift-config = { workspace = true }
+rift-core = { workspace = true }
+rift-fs = { workspace = true }
+rift-platform = { workspace = true }
+uic = { workspace = true }

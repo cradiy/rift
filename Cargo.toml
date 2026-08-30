@@ -1,0 +1,46 @@
+[workspace]
+resolver = "2"
+members = [
+  "app",
+  "crates/rift-config",
+  "crates/rift-core",
+  "crates/rift-fs",
+  "crates/rift-platform",
+]
+
+
+[workspace.dependencies]
+
+gpui = { git = "https://github.com/cradiy/gpui.git", rev = "a1b1a04cf7ff1821ad838d5374423c55585c983b" }
+gpui_effects = { git = "https://github.com/cradiy/gpui.git", rev = "a1b1a04cf7ff1821ad838d5374423c55585c983b" }
+gpui_platform = { git = "https://github.com/cradiy/gpui.git", rev = "a1b1a04cf7ff1821ad838d5374423c55585c983b", features = [
+  "wayland",
+  "x11",
+] }
+image = "0.25.1"
+uic = { git = "https://github.com/cradiy/gpui.git", rev = "a1b1a04cf7ff1821ad838d5374423c55585c983b" }
+rift-config = { path = "crates/rift-config" }
+rift-core = { path = "crates/rift-core" }
+rift-fs = { path = "crates/rift-fs" }
+rift-platform = { path = "crates/rift-platform" }
+
+# Keep development builds debuggable while optimizing the CPU-heavy SVG path.
+# Cargo profiles are owned by the workspace root, so the equivalent settings
+# in the GPUI workspace do not apply when Rift is the build entry point.
+[profile.dev.package.gpui]
+opt-level = 1
+
+[profile.dev.package.resvg]
+opt-level = 3
+
+[profile.dev.package.usvg]
+opt-level = 3
+
+[profile.dev.package.tiny-skia]
+opt-level = 3
+
+[profile.dev.package.tiny-skia-path]
+opt-level = 3
+
+[profile.dev.package.svgtypes]
+opt-level = 3
