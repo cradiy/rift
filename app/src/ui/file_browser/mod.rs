@@ -25,7 +25,7 @@ use uic::{
     },
 };
 
-use crate::presentation::{BrowserController, NavigationController, present_browser};
+use crate::presentation::{BrowserController, BrowserItem, NavigationController, present_browser};
 
 use self::files::FileItemContext;
 use self::inline_rename::InlineRenameState;
@@ -240,6 +240,7 @@ impl FileBrowser {
             )
         };
         let search_query = self.search_input.read(cx).value().trim().to_owned();
+        let selection_status = selection_status(&all_items);
         let all_item_count = all_items.len();
         let items = if search_query.is_empty() {
             all_items
@@ -266,15 +267,6 @@ impl FileBrowser {
             let entity = cx.entity();
             cx.defer(move |cx| cx.notify(entity.entity_id()));
         }
-        let title = if is_trash {
-            "Trash".to_owned()
-        } else {
-            current_directory
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .filter(|name| !name.is_empty())
-                .unwrap_or_else(|| current_directory.display().to_string())
-        };
         let load_notice = match &load_state {
             LoadState::Loading { .. } if items.is_empty() => Some("Loading folder…".to_owned()),
             LoadState::Failed { message, .. } => Some(message.clone()),
@@ -305,7 +297,7 @@ impl FileBrowser {
                     can_go_back,
                     can_go_forward,
                     can_go_up,
-                    title,
+                    current_directory: current_directory.clone(),
                     compact: compact_toolbar,
                     sidebar_visible: self.sidebar_visible,
                     sort,
@@ -405,53 +397,59 @@ impl FileBrowser {
                     }),
             )
             .child(Self::status_bar(
-                if is_trash {
-                    None
-                } else {
-                    Some(&current_directory)
-                },
                 item_count,
                 all_item_count,
                 !search_query.is_empty(),
+                selection_status,
                 &load_state,
             ))
             .into_any_element()
     }
 
     fn status_bar(
-        current_directory: Option<&std::path::Path>,
         item_count: usize,
         all_item_count: usize,
         search_active: bool,
+        selection_status: Option<String>,
         load_state: &LoadState,
     ) -> impl IntoElement {
         let status = match load_state {
             LoadState::Loading { .. } => "Loading".to_owned(),
             LoadState::Failed { .. } => "Unavailable".to_owned(),
-            LoadState::Idle if search_active => {
-                format!("{item_count} of {all_item_count} items")
-            }
-            LoadState::Idle => format!("{item_count} items"),
+            LoadState::Idle => match selection_status {
+                Some(status) => status,
+                None if search_active => format!("{item_count} of {all_item_count} items"),
+                None => format!("{item_count} items"),
+            },
         };
         div()
             .h(px(27.))
             .px(px(12.))
             .flex()
             .items_center()
-            .gap(px(6.))
+            .justify_end()
             .border_t_1()
             .border_color(rgba(0xffffff10))
             .text_xs()
             .text_color(rgba(0xc3c1c99c))
-            .child(
-                div().flex_1().min_w_0().truncate().child(
-                    current_directory
-                        .map(|path| path.display().to_string())
-                        .unwrap_or_else(|| "Trash".to_owned()),
-                ),
-            )
-            .child(status)
+            .child(div().max_w(px(480.)).truncate().child(status))
     }
+}
+
+fn selection_status(items: &[BrowserItem]) -> Option<String> {
+    let mut selected = items.iter().filter(|item| item.selected);
+    let first = selected.next()?;
+    let second = selected.next();
+
+    if second.is_none() {
+        return Some(if first.is_directory {
+            "1 folder selected".to_owned()
+        } else {
+            format!("1 file selected · {}", first.size)
+        });
+    }
+
+    Some(format!("{} items selected", 2 + selected.count()))
 }
 
 fn items_are_empty(load_state: &LoadState, item_count: usize) -> bool {
@@ -530,5 +528,60 @@ impl Render for FileBrowser {
 impl Focusable for FileBrowser {
     fn focus_handle(&self, _: &gpui::App) -> FocusHandle {
         self.focus_handle.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use rift_core::domain::EntryCategory;
+
+    use super::{BrowserItem, selection_status};
+    use crate::presentation::ItemIcon;
+
+    fn item(name: &str, is_directory: bool, size: &str, selected: bool) -> BrowserItem {
+        BrowserItem {
+            path: PathBuf::from(name),
+            name: name.to_owned(),
+            detail: if is_directory { "Folder" } else { size }.to_owned(),
+            modified: "—".to_owned(),
+            size: size.to_owned(),
+            byte_len: 0,
+            modified_at: None,
+            kind: if is_directory { "Folder" } else { "Document" }.to_owned(),
+            category: if is_directory {
+                EntryCategory::Folder
+            } else {
+                EntryCategory::Document
+            },
+            icon: if is_directory {
+                ItemIcon::Folder
+            } else {
+                ItemIcon::File
+            },
+            is_directory,
+            alias: false,
+            selected,
+        }
+    }
+
+    #[test]
+    fn status_summarizes_the_current_selection() {
+        let folder = item("Photos", true, "—", true);
+        let file = item("notes.md", false, "1.5 KB", true);
+
+        assert_eq!(
+            selection_status(std::slice::from_ref(&folder)).as_deref(),
+            Some("1 folder selected")
+        );
+        assert_eq!(
+            selection_status(std::slice::from_ref(&file)).as_deref(),
+            Some("1 file selected · 1.5 KB")
+        );
+        assert_eq!(
+            selection_status(&[folder, file]).as_deref(),
+            Some("2 items selected")
+        );
     }
 }

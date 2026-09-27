@@ -1,4 +1,6 @@
-use gpui::{Div, FontWeight, IntoElement, Stateful, div, prelude::*, px, rgba, svg};
+use std::path::{Component, Path, PathBuf};
+
+use gpui::{Div, FontWeight, IntoElement, SharedString, Stateful, div, prelude::*, px, rgba, svg};
 use rift_core::{
     application::{BrowserMessage, SortSpec, ViewMode},
     ports::FileOperation,
@@ -15,18 +17,27 @@ use crate::{presentation::BrowserController, ui::theme};
 
 use super::FileBrowser;
 
+const MAX_VISIBLE_BREADCRUMBS: usize = 3;
+
 pub(super) struct ToolbarState {
     pub(super) view_mode: ViewMode,
     pub(super) can_go_back: bool,
     pub(super) can_go_forward: bool,
     pub(super) can_go_up: bool,
-    pub(super) title: String,
+    pub(super) current_directory: PathBuf,
     pub(super) compact: bool,
     pub(super) sidebar_visible: bool,
     pub(super) sort: SortSpec,
     pub(super) has_selection: bool,
     pub(super) show_hidden_files: bool,
     pub(super) is_trash: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct BreadcrumbSegment {
+    label: String,
+    path: PathBuf,
+    root: bool,
 }
 
 impl FileBrowser {
@@ -262,12 +273,177 @@ impl FileBrowser {
             .children(buttons)
     }
 
+    fn breadcrumb_segments(path: &Path) -> Vec<BreadcrumbSegment> {
+        let mut segments = Vec::new();
+        let mut accumulated = PathBuf::new();
+
+        for component in path.components() {
+            match component {
+                Component::RootDir => {
+                    accumulated.push(Path::new("/"));
+                    segments.push(BreadcrumbSegment {
+                        label: "File System".to_owned(),
+                        path: accumulated.clone(),
+                        root: true,
+                    });
+                }
+                Component::Normal(name) => {
+                    accumulated.push(name);
+                    segments.push(BreadcrumbSegment {
+                        label: name.to_string_lossy().into_owned(),
+                        path: accumulated.clone(),
+                        root: false,
+                    });
+                }
+                Component::Prefix(_) | Component::CurDir | Component::ParentDir => {}
+            }
+        }
+
+        segments
+    }
+
+    fn visible_breadcrumb_segments(path: &Path) -> Vec<BreadcrumbSegment> {
+        let mut segments = Self::breadcrumb_segments(path);
+        let hidden_count = segments.len().saturating_sub(MAX_VISIBLE_BREADCRUMBS);
+        segments.drain(..hidden_count);
+        segments
+    }
+
+    fn address_bar(
+        &self,
+        current_directory: PathBuf,
+        is_trash: bool,
+        compact: bool,
+        cx: &mut gpui::Context<Self>,
+    ) -> gpui::AnyElement {
+        let segments = if is_trash {
+            vec![BreadcrumbSegment {
+                label: "Trash".to_owned(),
+                path: current_directory,
+                root: true,
+            }]
+        } else {
+            Self::visible_breadcrumb_segments(&current_directory)
+        };
+        let segment_count = segments.len();
+        let mut contents = Vec::with_capacity(segment_count.saturating_mul(2));
+
+        for (index, segment) in segments.into_iter().enumerate() {
+            if index > 0 {
+                contents.push(
+                    svg()
+                        .path(LucideIcons::ChevronRight)
+                        .size(px(12.))
+                        .flex_none()
+                        .text_color(rgba(0xb9c0cd56))
+                        .into_any_element(),
+                );
+            }
+
+            let current = index + 1 == segment_count;
+            let destination = segment.path.clone();
+            let controller = self.controller.clone();
+            let show_root_label = current || segment_count == 1;
+            let label = segment.label;
+            let id = SharedString::from(format!("breadcrumb:{}", destination.display()));
+            let crumb = div()
+                .id(id)
+                .h(px(30.))
+                .min_w_0()
+                .px(px(if segment.root { 7. } else { 9. }))
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .rounded_lg()
+                .text_size(px(12.5))
+                .font_weight(if current {
+                    FontWeight::SEMIBOLD
+                } else {
+                    FontWeight::MEDIUM
+                })
+                .text_color(if current {
+                    rgba(0xf3f5f9ed)
+                } else {
+                    rgba(0xc8cbd4ae)
+                })
+                .when(segment.root, |crumb| {
+                    crumb.child(
+                        svg()
+                            .path(if is_trash {
+                                LucideIcons::Trash2
+                            } else {
+                                LucideIcons::FolderRoot
+                            })
+                            .size(px(15.))
+                            .flex_none()
+                            .text_color(if current {
+                                rgba(0x6bcaf1ed)
+                            } else {
+                                rgba(0xb8c3d3a8)
+                            }),
+                    )
+                })
+                .when(!segment.root || show_root_label, |crumb| {
+                    crumb.child(
+                        div()
+                            .min_w_0()
+                            .max_w(px(if compact { 82. } else { 118. }))
+                            .truncate()
+                            .child(label),
+                    )
+                })
+                .when(current, |crumb| {
+                    crumb
+                        .bg(rgba(0x536a8940))
+                        .border_1()
+                        .border_color(rgba(0x86c9ee22))
+                })
+                .when(!current, |crumb| {
+                    crumb
+                        .cursor_pointer()
+                        .hover(|style| style.bg(rgba(0xffffff11)).text_color(rgba(0xe8eaf0df)))
+                        .on_click(cx.listener(move |_, _, _, cx| {
+                            controller.update(cx, |controller, cx| {
+                                controller
+                                    .dispatch(BrowserMessage::Navigate(destination.clone()), cx);
+                            });
+                        }))
+                });
+            contents.push(crumb.into_any_element());
+        }
+
+        div()
+            .id("address-bar")
+            .h(px(40.))
+            .min_w_0()
+            .max_w(px(if compact { 310. } else { 430. }))
+            .px(px(4.))
+            .flex()
+            .items_center()
+            .gap(px(1.))
+            .overflow_hidden()
+            .rounded_2xl()
+            .border_1()
+            .border_color(rgba(0xffffff14))
+            .bg(rgba(0x11141d7d))
+            .shadow(vec![
+                gpui::BoxShadow::new(px(0.), px(3.), rgba(0x00000025).into())
+                    .blur_radius(px(10.))
+                    .spread_radius(px(-4.)),
+            ])
+            .hover(|style| style.border_color(rgba(0x91cde832)))
+            .children(contents)
+            .into_any_element()
+    }
+
     pub(super) fn toolbar(
         &mut self,
         state: ToolbarState,
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
         let sidebar_expand = (!state.sidebar_visible).then(|| self.sidebar_expand_button(cx));
+        let address_bar =
+            self.address_bar(state.current_directory, state.is_trash, state.compact, cx);
         div()
             .h(px(72.))
             .px(px(19.))
@@ -278,10 +454,12 @@ impl FileBrowser {
             .border_color(rgba(0xffffff08))
             .child(
                 div()
+                    .flex_1()
                     .min_w_0()
                     .flex()
                     .items_center()
-                    .gap(px(15.))
+                    .gap(px(12.))
+                    .pr(px(12.))
                     .when_some(sidebar_expand, |toolbar, button| toolbar.child(button))
                     .child(Self::toolbar_group(
                         "history-controls",
@@ -309,18 +487,11 @@ impl FileBrowser {
                             ),
                         ],
                     ))
-                    .child(
-                        div()
-                            .max_w(px(230.))
-                            .truncate()
-                            .text_sm()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(rgba(0xf4f3f6ee))
-                            .child(state.title),
-                    ),
+                    .child(address_bar),
             )
             .child(
                 div()
+                    .flex_none()
                     .flex()
                     .items_center()
                     .gap(px(12.))
@@ -395,5 +566,61 @@ impl FileBrowser {
                         ))
                     }),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+
+    use super::FileBrowser;
+
+    #[test]
+    fn breadcrumb_segments_keep_each_ancestor_navigable() {
+        let segments = FileBrowser::breadcrumb_segments(Path::new("/home/cradiy/logs"));
+
+        let labels = segments
+            .iter()
+            .map(|segment| segment.label.as_str())
+            .collect::<Vec<_>>();
+        let paths = segments
+            .iter()
+            .map(|segment| segment.path.clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(labels, ["File System", "home", "cradiy", "logs"]);
+        assert_eq!(
+            paths,
+            [
+                PathBuf::from("/"),
+                PathBuf::from("/home"),
+                PathBuf::from("/home/cradiy"),
+                PathBuf::from("/home/cradiy/logs"),
+            ]
+        );
+    }
+
+    #[test]
+    fn visible_breadcrumbs_keep_the_current_directory_and_two_parents() {
+        let segments =
+            FileBrowser::visible_breadcrumb_segments(Path::new("/home/cradiy/code/project/src"));
+        let labels = segments
+            .iter()
+            .map(|segment| segment.label.as_str())
+            .collect::<Vec<_>>();
+        let paths = segments
+            .iter()
+            .map(|segment| segment.path.clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(labels, ["code", "project", "src"]);
+        assert_eq!(
+            paths,
+            [
+                PathBuf::from("/home/cradiy/code"),
+                PathBuf::from("/home/cradiy/code/project"),
+                PathBuf::from("/home/cradiy/code/project/src"),
+            ]
+        );
     }
 }
