@@ -73,13 +73,16 @@ impl RenderOnce for ImageThumbnail {
         let is_svg = path
             .extension()
             .is_some_and(|extension| extension.eq_ignore_ascii_case("svg"));
-        let preview = if is_svg
-            && self.source.byte_len > 0
-            && let Some(external_path) = path.to_str()
-        {
+        let svg_path = (is_svg && self.source.byte_len > 0)
+            .then(|| path.to_str())
+            .flatten()
+            .map(str::to_owned);
+        let show_placeholder = is_svg && svg_path.is_none();
+        let preview = if let Some(external_path) = svg_path {
             color_svg()
-                .external_path(external_path.to_owned())
+                .external_path(external_path)
                 .current_color(rgba(0xd8d8decc))
+                .object_fit(ObjectFit::Contain)
                 .absolute()
                 .inset_0()
                 .size_full()
@@ -121,20 +124,22 @@ impl RenderOnce for ImageThumbnail {
                     .blur_radius(px(7.))
                     .spread_radius(px(-2.)),
             ])
-            .child(
-                div()
-                    .absolute()
-                    .inset_0()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(
-                        svg()
-                            .path(LucideIcons::Image)
-                            .size(icon_size)
-                            .text_color(rgba(0x9da5b878)),
-                    ),
-            )
+            .when(show_placeholder, |thumbnail| {
+                thumbnail.child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            svg()
+                                .path(LucideIcons::Image)
+                                .size(icon_size)
+                                .text_color(rgba(0x9da5b878)),
+                        ),
+                )
+            })
             .child(preview)
     }
 }

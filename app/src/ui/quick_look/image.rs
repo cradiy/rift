@@ -34,6 +34,7 @@ impl QuickLookProvider for ImageQuickLookProvider {
             color_svg()
                 .external_path(external_path.to_owned())
                 .current_color(rgba(0xe4e7eef5))
+                .object_fit(ObjectFit::Contain)
                 .size_full()
                 .into_any_element()
         } else if is_svg {
