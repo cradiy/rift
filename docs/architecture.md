@@ -67,9 +67,10 @@ desktop-launch APIs from leaking into `rift-core`.
 
 ### `rift-config`
 
-Owns the strict TOML schema, validation, default-file creation and path
-resolution. The current configuration covers fonts and logging. It does not
-initialize the logger or depend on GPUI, so future binaries can reuse it.
+Owns the strict TOML schema, validation, default-file creation, path resolution
+and atomic replacement when settings are saved. The configuration covers fonts,
+logging and durable browser preferences. It does not initialize the logger or
+depend on GPUI, so future binaries can reuse it.
 
 ### `app`
 
@@ -78,6 +79,9 @@ interface:
 
 - `app.rs` loads configuration, initializes logging/UIC, creates the window and
   injects `LocalFileSystem` plus `SystemNavigationSource`;
+- `config.rs` maps persisted browser preferences to core state and serializes
+  updates through a dedicated background writer so UI interactions never wait
+  on configuration I/O;
 - `presentation/controller.rs` owns `BrowserState`, executes directory effects
   and filesystem commands away from the GPUI thread, and stores the in-process
   copy buffer;
@@ -158,6 +162,21 @@ NavigationController
   -> sidebar re-render
 ```
 
+### Configuration persistence
+
+```text
+view/sort/hidden-file/sidebar change
+  -> AppConfig updates the in-memory BrowserConfig
+  -> ordered background configuration writer
+  -> rift-config validation + TOML serialization
+  -> atomic replacement of config.toml
+```
+
+Only durable preferences are saved. Current directory, selection, scroll
+positions, inline-edit state and marquee geometry remain session-local. Rapid
+preference changes are serialized and coalesced so an older write cannot replace
+the latest state.
+
 ### Quick Look
 
 Quick Look uses a registry of `QuickLookProvider` implementations. The host
@@ -189,7 +208,8 @@ profiles because Quick Look and thumbnails must remain usable in debug builds.
 - `rift-core` must not depend on GPUI, UIC or concrete filesystem APIs.
 - `rift-fs` must not mutate browser state or format UI strings.
 - `rift-platform` owns desktop integration, not file-manager policy.
-- `rift-config` defines settings but does not initialize logging or UI globals.
+- `rift-config` defines, validates and atomically stores settings but does not
+  initialize logging or UI globals.
 - GPUI components must not perform blocking filesystem mutations directly.
 - Blocking reads, mutations, image decoding and platform opens must leave the
   GPUI thread.

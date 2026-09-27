@@ -19,3 +19,6 @@ rift-core = { workspace = true }
 rift-fs = { workspace = true }
 rift-platform = { workspace = true }
 uic = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

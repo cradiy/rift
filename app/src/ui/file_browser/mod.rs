@@ -25,7 +25,10 @@ use uic::{
     },
 };
 
-use crate::presentation::{BrowserController, BrowserItem, NavigationController, present_browser};
+use crate::{
+    config::AppConfig,
+    presentation::{BrowserController, BrowserItem, NavigationController, present_browser},
+};
 
 use self::files::FileItemContext;
 use self::inline_rename::InlineRenameState;
@@ -71,6 +74,7 @@ impl FileBrowser {
     pub(crate) fn new(
         controller: Entity<BrowserController>,
         navigation: Entity<NavigationController>,
+        sidebar_visible: bool,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) -> Self {
@@ -99,7 +103,7 @@ impl FileBrowser {
             list_scrollbar: ScrollbarState::new(),
             search_input,
             focus_handle,
-            sidebar_visible: true,
+            sidebar_visible,
             sidebar_animated: false,
             inline_rename: None,
             rendered_directory: std::path::PathBuf::new(),
@@ -205,6 +209,7 @@ impl FileBrowser {
         }
         self.sidebar_visible = visible;
         self.sidebar_animated = true;
+        AppConfig::update_sidebar_visible(cx, visible);
         cx.notify();
     }
 

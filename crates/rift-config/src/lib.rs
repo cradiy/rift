@@ -8,26 +8,28 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub const CONFIG_ENV: &str = "RIFT_CONFIG";
 
 const DEFAULT_CONFIG: &str = include_str!("../../../config.toml.example");
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RiftConfig {
     pub fonts: FontsConfig,
     pub logging: LoggingConfig,
+    pub browser: BrowserConfig,
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct FontsConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub family: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LogLevel {
     Trace,
@@ -52,7 +54,7 @@ impl fmt::Display for LogLevel {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct LoggingConfig {
     pub level: LogLevel,
@@ -61,6 +63,56 @@ pub struct LoggingConfig {
     pub max_file_size_bytes: u64,
     pub retained_files: usize,
     pub console: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BrowserConfig {
+    pub view_mode: BrowserViewMode,
+    pub sort_field: BrowserSortField,
+    pub sort_direction: BrowserSortDirection,
+    pub directories_first: bool,
+    pub show_hidden_files: bool,
+    pub sidebar_visible: bool,
+}
+
+impl Default for BrowserConfig {
+    fn default() -> Self {
+        Self {
+            view_mode: BrowserViewMode::Grid,
+            sort_field: BrowserSortField::Name,
+            sort_direction: BrowserSortDirection::Ascending,
+            directories_first: true,
+            show_hidden_files: false,
+            sidebar_visible: true,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BrowserViewMode {
+    #[default]
+    Grid,
+    List,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BrowserSortField {
+    #[default]
+    Name,
+    Modified,
+    Size,
+    Kind,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BrowserSortDirection {
+    #[default]
+    Ascending,
+    Descending,
 }
 
 impl Default for LoggingConfig {
@@ -127,6 +179,52 @@ impl LoadedConfig {
             .parent()
             .context("configuration path has no parent directory")?;
         Ok(parent.join(directory))
+    }
+
+    pub fn save(&self) -> Result<()> {
+        self.config.validate()?;
+        let contents = toml::to_string_pretty(&self.config)
+            .context("failed to serialize Rift configuration")?;
+        let parent = self
+            .path
+            .parent()
+            .context("configuration path has no parent directory")?;
+        fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create configuration directory {}",
+                parent.display()
+            )
+        })?;
+
+        let mut temporary = tempfile::NamedTempFile::new_in(parent).with_context(|| {
+            format!(
+                "failed to create temporary configuration in {}",
+                parent.display()
+            )
+        })?;
+        temporary.write_all(contents.as_bytes()).with_context(|| {
+            format!(
+                "failed to write temporary configuration for {}",
+                self.path.display()
+            )
+        })?;
+        temporary.flush().with_context(|| {
+            format!(
+                "failed to flush temporary configuration for {}",
+                self.path.display()
+            )
+        })?;
+        temporary.as_file().sync_all().with_context(|| {
+            format!(
+                "failed to sync temporary configuration for {}",
+                self.path.display()
+            )
+        })?;
+        temporary
+            .persist(&self.path)
+            .map_err(|error| error.error)
+            .with_context(|| format!("failed to replace configuration {}", self.path.display()))?;
+        Ok(())
     }
 }
 
@@ -253,5 +351,39 @@ mod tests {
         };
 
         assert_eq!(logging.filter_spec(), "debug,wgpu=error");
+    }
+
+    #[test]
+    fn saves_and_reloads_browser_preferences_as_toml() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        let mut loaded = LoadedConfig::load_or_create(path.clone()).unwrap();
+        loaded.config.browser = BrowserConfig {
+            view_mode: BrowserViewMode::List,
+            sort_field: BrowserSortField::Modified,
+            sort_direction: BrowserSortDirection::Descending,
+            directories_first: false,
+            show_hidden_files: true,
+            sidebar_visible: false,
+        };
+
+        loaded.save().unwrap();
+
+        let contents = fs::read_to_string(&path).unwrap();
+        let reloaded = LoadedConfig::load_or_create(path).unwrap();
+        assert!(contents.contains("[browser]"));
+        assert_eq!(reloaded.config, loaded.config);
+    }
+
+    #[test]
+    fn invalid_configuration_is_not_written() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        let mut loaded = LoadedConfig::load_or_create(path.clone()).unwrap();
+        let original = fs::read_to_string(&path).unwrap();
+        loaded.config.fonts.family = Some("   ".to_owned());
+
+        assert!(loaded.save().is_err());
+        assert_eq!(fs::read_to_string(path).unwrap(), original);
     }
 }

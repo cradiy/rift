@@ -8,3 +8,11 @@ module_filters = "gpui::window=off,wgpu=error,wgpu_hal=error,naga=error,zbus=err
 max_file_size_bytes = 10485760
 retained_files = 7
 console = true
+
+[browser]
+view_mode = "grid"
+sort_field = "name"
+sort_direction = "ascending"
+directories_first = true
+show_hidden_files = false
+sidebar_visible = true

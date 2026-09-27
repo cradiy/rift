@@ -12,7 +12,7 @@ use uic::assets::LucideAssets;
 use uic::components::{context_menu, modal, toast};
 
 use crate::{
-    config::AppConfig,
+    config::{AppConfig, BrowserPreferences},
     logging,
     presentation::{BrowserController, NavigationController},
     ui::file_browser::FileBrowser,
@@ -43,7 +43,7 @@ pub fn run() -> ExitCode {
     application()
         .with_assets(LucideAssets::new())
         .run(move |cx: &mut App| {
-            cx.set_global(AppConfig(loaded_config.clone()));
+            cx.set_global(AppConfig::new(loaded_config.clone()));
             uic::init(cx);
             crate::ui::quick_look::init(cx);
             crate::ui::file_browser::init_key_bindings(cx);
@@ -81,16 +81,24 @@ impl RiftApp {
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) -> Self {
+        let BrowserPreferences {
+            view_mode,
+            sort,
+            show_hidden_files,
+            sidebar_visible,
+        } = cx.global::<AppConfig>().browser_preferences();
         let controller = cx.new(|cx| {
-            let mut controller = BrowserController::new(
-                BrowserState::new(initial_directory),
-                Arc::new(LocalFileSystem),
-            );
+            let mut state = BrowserState::new(initial_directory);
+            state.update(BrowserMessage::SetViewMode(view_mode));
+            state.update(BrowserMessage::SetSort(sort));
+            state.update(BrowserMessage::SetShowHiddenFiles(show_hidden_files));
+            let mut controller = BrowserController::new(state, Arc::new(LocalFileSystem));
             controller.dispatch(BrowserMessage::Refresh, cx);
             controller
         });
         let navigation = cx.new(|cx| NavigationController::new(navigation_source, cx));
-        let browser = cx.new(|cx| FileBrowser::new(controller, navigation, window, cx));
+        let browser =
+            cx.new(|cx| FileBrowser::new(controller, navigation, sidebar_visible, window, cx));
         Self { browser }
     }
 }
@@ -101,7 +109,13 @@ impl Render for RiftApp {
         _window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) -> impl gpui::IntoElement {
-        let font_family = cx.global::<AppConfig>().0.config.fonts.family.clone();
+        let font_family = cx
+            .global::<AppConfig>()
+            .loaded()
+            .config
+            .fonts
+            .family
+            .clone();
         let root = div().size_full();
         let root = if let Some(font_family) = font_family {
             root.font_family(SharedString::from(font_family))

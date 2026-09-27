@@ -6,6 +6,8 @@ use rift_core::{
     ports::{FileOperation, FileOperationResult, FileSystem, FileSystemError},
 };
 
+use crate::config::AppConfig;
+
 pub(crate) struct BrowserController {
     state: BrowserState,
     file_system: Arc<dyn FileSystem>,
@@ -74,7 +76,21 @@ impl BrowserController {
     }
 
     pub(crate) fn dispatch(&mut self, message: BrowserMessage, cx: &mut Context<Self>) {
+        let preferences_changed = matches!(
+            &message,
+            BrowserMessage::SetViewMode(_)
+                | BrowserMessage::SetSort(_)
+                | BrowserMessage::SetShowHiddenFiles(_)
+        );
         let effects = self.state.update(message);
+        if preferences_changed {
+            AppConfig::update_browser_state(
+                cx,
+                self.state.view_mode(),
+                self.state.sort(),
+                self.state.show_hidden_files(),
+            );
+        }
         cx.notify();
 
         for effect in effects {

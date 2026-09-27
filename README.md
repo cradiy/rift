@@ -10,8 +10,8 @@ cargo run -p rift
 
 Rift creates its configuration on first launch. On Linux the default path is
 `~/.config/rift/config.toml`; set `RIFT_CONFIG` to use another file. The current
-settings cover the application font and logging level, output directory,
-per-module filters, rotation and console output. See
+settings cover the application font, logging and persistent browser preferences
+such as view mode, sorting, hidden files and sidebar visibility. See
 [`config.toml.example`](config.toml.example) for the complete schema.
 `RUST_LOG` can temporarily override the configured logging level and filters.
 
