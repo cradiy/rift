@@ -2,7 +2,7 @@ use gpui::{
     AnyElement, Bounds, Entity, FontWeight, IntoElement, ListState, MouseButton, Pixels, Point,
     SharedString, div, list, point, prelude::*, px, rgba, svg,
 };
-use rift_core::application::{BrowserMessage, SelectionMode};
+use rift_core::application::{BrowserMessage, SelectionMode, SortField, ViewMode};
 use rift_core::domain::EntryCategory;
 use uic::assets::LucideIcons;
 use uic::components::{
@@ -218,6 +218,31 @@ impl FileBrowser {
             Self::push_grid_item_rows(&mut rows, items, columns, false);
         }
         rows
+    }
+
+    pub(super) fn reveal_path(&mut self, path: &std::path::Path, cx: &gpui::App) {
+        let items = self.navigable_items(cx);
+        let (view_mode, group_by_kind) = {
+            let controller = self.controller.read(cx);
+            let state = controller.state();
+            (state.view_mode(), state.sort().field == SortField::Kind)
+        };
+
+        match view_mode {
+            ViewMode::List => {
+                if let Some(index) = items.iter().position(|item| item.path == path) {
+                    self.list_scroll.scroll_to_reveal_item(index);
+                }
+            }
+            ViewMode::Grid => {
+                let rows = Self::grid_rows(items, group_by_kind, self.grid_columns);
+                if let Some(index) = rows.iter().position(|row| {
+                    matches!(row, GridRow::Items { entries, .. } if entries.iter().any(|item| item.path == path))
+                }) {
+                    self.grid_scroll.scroll_to_reveal_item(index);
+                }
+            }
+        }
     }
 
     fn file_list_rows(items: Vec<BrowserItem>) -> Vec<FileListRow> {

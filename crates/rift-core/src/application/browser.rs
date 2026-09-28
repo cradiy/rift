@@ -64,6 +64,9 @@ pub struct BrowserState {
     current_directory: PathBuf,
     entries: Vec<Entry>,
     selection: BTreeSet<PathBuf>,
+    active_selection: Option<PathBuf>,
+    selection_anchor: Option<PathBuf>,
+    selection_after_load: Option<PathBuf>,
     history: Vec<PathBuf>,
     history_index: usize,
     view_mode: ViewMode,
@@ -80,6 +83,7 @@ pub enum BrowserMessage {
     GoForward,
     GoUp,
     Refresh,
+    RefreshSelecting(PathBuf),
     SetViewMode(ViewMode),
     SetSort(SortSpec),
     SetShowHiddenFiles(bool),
@@ -88,6 +92,11 @@ pub enum BrowserMessage {
         mode: SelectionMode,
     },
     SetSelection(Vec<PathBuf>),
+    SetSelectionState {
+        paths: Vec<PathBuf>,
+        active: PathBuf,
+        anchor: PathBuf,
+    },
     ClearSelection,
     SelectAll,
     DirectoryLoaded {
@@ -114,6 +123,9 @@ impl BrowserState {
             current_directory: initial_directory,
             entries: Vec::new(),
             selection: BTreeSet::new(),
+            active_selection: None,
+            selection_anchor: None,
+            selection_after_load: None,
             history_index: 0,
             view_mode: ViewMode::Grid,
             sort: SortSpec::default(),
@@ -137,6 +149,14 @@ impl BrowserState {
 
     pub fn selection(&self) -> &BTreeSet<PathBuf> {
         &self.selection
+    }
+
+    pub fn active_selection(&self) -> Option<&Path> {
+        self.active_selection.as_deref()
+    }
+
+    pub fn selection_anchor(&self) -> Option<&Path> {
+        self.selection_anchor.as_deref()
     }
 
     pub fn view_mode(&self) -> ViewMode {
@@ -183,26 +203,30 @@ impl BrowserState {
                 if path == self.current_directory {
                     return self.start_load();
                 }
+                self.selection_after_load = None;
                 self.history.truncate(self.history_index + 1);
                 self.history.push(path.clone());
                 self.history_index = self.history.len() - 1;
                 self.current_directory = path;
-                self.selection.clear();
+                self.clear_selection();
                 self.start_load()
             }
             BrowserMessage::GoBack if self.can_go_back() => {
+                self.selection_after_load = None;
                 self.history_index -= 1;
                 self.current_directory = self.history[self.history_index].clone();
-                self.selection.clear();
+                self.clear_selection();
                 self.start_load()
             }
             BrowserMessage::GoForward if self.can_go_forward() => {
+                self.selection_after_load = None;
                 self.history_index += 1;
                 self.current_directory = self.history[self.history_index].clone();
-                self.selection.clear();
+                self.clear_selection();
                 self.start_load()
             }
             BrowserMessage::GoUp if self.can_go_up() => {
+                let child = self.current_directory.clone();
                 let parent = self
                     .current_directory
                     .parent()
@@ -212,10 +236,15 @@ impl BrowserState {
                 self.history.push(parent.clone());
                 self.history_index = self.history.len() - 1;
                 self.current_directory = parent;
-                self.selection.clear();
+                self.clear_selection();
+                self.selection_after_load = Some(child);
                 self.start_load()
             }
             BrowserMessage::Refresh => self.start_load(),
+            BrowserMessage::RefreshSelecting(path) => {
+                self.selection_after_load = Some(path);
+                self.start_load()
+            }
             BrowserMessage::SetViewMode(mode) => {
                 self.view_mode = mode;
                 Vec::new()
@@ -234,18 +263,22 @@ impl BrowserState {
                             .find(|entry| entry.path() == path)
                             .is_some_and(|entry| !entry.is_hidden())
                     });
+                    self.reconcile_selection_focus();
                 }
                 Vec::new()
             }
             BrowserMessage::Select { path, mode } => {
                 match mode {
                     SelectionMode::Replace => {
-                        self.selection.clear();
-                        self.selection.insert(path);
+                        self.select_single(path);
                     }
                     SelectionMode::Toggle => {
                         if !self.selection.remove(&path) {
-                            self.selection.insert(path);
+                            self.selection.insert(path.clone());
+                            self.active_selection = Some(path.clone());
+                            self.selection_anchor = Some(path);
+                        } else {
+                            self.reconcile_selection_focus();
                         }
                     }
                 }
@@ -253,19 +286,41 @@ impl BrowserState {
             }
             BrowserMessage::SetSelection(paths) => {
                 self.selection = paths.into_iter().collect();
+                self.reconcile_selection_focus();
+                Vec::new()
+            }
+            BrowserMessage::SetSelectionState {
+                paths,
+                active,
+                anchor,
+            } => {
+                self.selection = paths.into_iter().collect();
+                if self.selection.contains(&active) {
+                    self.active_selection = Some(active);
+                } else {
+                    self.active_selection = self.selection.iter().next().cloned();
+                }
+                if self.selection.contains(&anchor) {
+                    self.selection_anchor = Some(anchor);
+                } else {
+                    self.selection_anchor = self.active_selection.clone();
+                }
                 Vec::new()
             }
             BrowserMessage::ClearSelection => {
-                self.selection.clear();
+                self.clear_selection();
                 Vec::new()
             }
             BrowserMessage::SelectAll => {
-                self.selection = self
+                let paths = self
                     .entries
                     .iter()
                     .filter(|entry| self.show_hidden_files || !entry.is_hidden())
                     .map(|entry| entry.path().to_path_buf())
-                    .collect();
+                    .collect::<Vec<_>>();
+                self.active_selection = paths.first().cloned();
+                self.selection_anchor = self.active_selection.clone();
+                self.selection = paths.into_iter().collect();
                 Vec::new()
             }
             BrowserMessage::DirectoryLoaded {
@@ -275,7 +330,14 @@ impl BrowserState {
             } if self.is_current_request(&path, request_id) => {
                 self.entries = entries;
                 self.sort_entries();
-                self.selection.clear();
+                self.clear_selection();
+                if let Some(path) = self.selection_after_load.take()
+                    && self.entries.iter().any(|entry| {
+                        entry.path() == path && (self.show_hidden_files || !entry.is_hidden())
+                    })
+                {
+                    self.select_single(path);
+                }
                 self.load_state = LoadState::Idle;
                 Vec::new()
             }
@@ -307,6 +369,36 @@ impl BrowserState {
             request_id,
         };
         vec![BrowserEffect::ReadDirectory { path, request_id }]
+    }
+
+    fn clear_selection(&mut self) {
+        self.selection.clear();
+        self.active_selection = None;
+        self.selection_anchor = None;
+    }
+
+    fn select_single(&mut self, path: PathBuf) {
+        self.selection.clear();
+        self.selection.insert(path.clone());
+        self.active_selection = Some(path.clone());
+        self.selection_anchor = Some(path);
+    }
+
+    fn reconcile_selection_focus(&mut self) {
+        if self
+            .active_selection
+            .as_ref()
+            .is_none_or(|path| !self.selection.contains(path))
+        {
+            self.active_selection = self.selection.iter().next().cloned();
+        }
+        if self
+            .selection_anchor
+            .as_ref()
+            .is_none_or(|path| !self.selection.contains(path))
+        {
+            self.selection_anchor = self.active_selection.clone();
+        }
     }
 
     fn is_current_request(&self, path: &Path, request_id: u64) -> bool {
@@ -467,6 +559,62 @@ mod tests {
     }
 
     #[test]
+    fn go_up_selects_the_directory_that_was_left_after_loading_parent() {
+        let child = PathBuf::from("/home/me/code");
+        let parent = PathBuf::from("/home/me");
+        let mut state = BrowserState::new(child.clone());
+
+        let effects = state.update(BrowserMessage::GoUp);
+        let [BrowserEffect::ReadDirectory { request_id, .. }] = effects.as_slice() else {
+            panic!("go up should emit one read effect");
+        };
+        state.update(BrowserMessage::DirectoryLoaded {
+            path: parent,
+            request_id: *request_id,
+            entries: vec![Entry::new(
+                child.clone(),
+                OsString::from("code"),
+                EntryKind::Directory,
+                0,
+                None,
+                false,
+            )],
+        });
+
+        assert_eq!(state.selection().len(), 1);
+        assert_eq!(state.active_selection(), Some(child.as_path()));
+        assert_eq!(state.selection_anchor(), Some(child.as_path()));
+    }
+
+    #[test]
+    fn refresh_selecting_restores_the_renamed_path_after_loading() {
+        let directory = PathBuf::from("/home/me");
+        let renamed = directory.join("renamed.txt");
+        let mut state = BrowserState::new(directory.clone());
+
+        let effects = state.update(BrowserMessage::RefreshSelecting(renamed.clone()));
+        let [BrowserEffect::ReadDirectory { request_id, .. }] = effects.as_slice() else {
+            panic!("refresh should emit one read effect");
+        };
+        state.update(BrowserMessage::DirectoryLoaded {
+            path: directory,
+            request_id: *request_id,
+            entries: vec![Entry::new(
+                renamed.clone(),
+                OsString::from("renamed.txt"),
+                EntryKind::File,
+                12,
+                None,
+                false,
+            )],
+        });
+
+        assert_eq!(state.selection().len(), 1);
+        assert_eq!(state.active_selection(), Some(renamed.as_path()));
+        assert_eq!(state.selection_anchor(), Some(renamed.as_path()));
+    }
+
+    #[test]
     fn toggle_selection_supports_multi_select_and_removal() {
         let mut state = BrowserState::new(PathBuf::from("/home/me"));
         let first = PathBuf::from("/home/me/first");
@@ -488,6 +636,26 @@ mod tests {
         assert_eq!(state.selection().len(), 1);
         assert!(state.selection().contains(&second));
         assert!(!state.selection().contains(&first));
+        assert_eq!(state.active_selection(), Some(second.as_path()));
+        assert_eq!(state.selection_anchor(), Some(second.as_path()));
+    }
+
+    #[test]
+    fn range_selection_keeps_an_explicit_active_item_and_anchor() {
+        let mut state = BrowserState::new(PathBuf::from("/home/me"));
+        let first = PathBuf::from("/home/me/first");
+        let second = PathBuf::from("/home/me/second");
+        let third = PathBuf::from("/home/me/third");
+
+        state.update(BrowserMessage::SetSelectionState {
+            paths: vec![first.clone(), second, third.clone()],
+            active: third.clone(),
+            anchor: first.clone(),
+        });
+
+        assert_eq!(state.selection().len(), 3);
+        assert_eq!(state.active_selection(), Some(third.as_path()));
+        assert_eq!(state.selection_anchor(), Some(first.as_path()));
     }
 
     #[test]

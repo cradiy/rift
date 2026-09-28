@@ -353,16 +353,25 @@ impl FileBrowser {
             }
             _ => None,
         };
+        let select_affected_path = matches!(&operation, FileOperation::Rename { .. });
         let task = controller.update(cx, |controller, cx| controller.perform(operation, cx));
         cx.spawn(async move |cx| {
             let result = task.await;
             cx.update(|cx| match result {
-                Ok(FileOperationResult { .. }) => {
+                Ok(FileOperationResult { affected_paths }) => {
                     controller.update(cx, |controller, cx| {
                         if let Some(paths) = removed_paths.as_deref() {
                             controller.forget_clipboard_paths(paths);
                         }
-                        controller.dispatch(BrowserMessage::Refresh, cx);
+                        let message = if select_affected_path {
+                            affected_paths
+                                .into_iter()
+                                .next()
+                                .map_or(BrowserMessage::Refresh, BrowserMessage::RefreshSelecting)
+                        } else {
+                            BrowserMessage::Refresh
+                        };
+                        controller.dispatch(message, cx);
                     });
                     toast::success(success_message, cx);
                 }

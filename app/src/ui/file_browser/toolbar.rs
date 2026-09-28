@@ -536,24 +536,26 @@ impl FileBrowser {
                                 ],
                             ))
                             .child(
-                                Input::new(&self.search_input)
-                                    .appearance(theme::input_appearance())
-                                    .w(px(190.))
-                                    .h(px(40.))
-                                    .px(px(13.))
-                                    .gap(px(7.))
-                                    .rounded_2xl()
-                                    .bg(rgba(0x12131a75))
-                                    .border_1()
-                                    .border_color(rgba(0xffffff0f))
-                                    .text_size(px(13.))
-                                    .text_color(rgba(0xe8e7ebdd))
-                                    .prefix(
-                                        svg()
-                                            .path(LucideIcons::Search)
-                                            .size(px(16.))
-                                            .text_color(rgba(0xb9b7c1a3)),
-                                    ),
+                                div().key_context("editing").child(
+                                    Input::new(&self.search_input)
+                                        .appearance(theme::input_appearance())
+                                        .w(px(190.))
+                                        .h(px(40.))
+                                        .px(px(13.))
+                                        .gap(px(7.))
+                                        .rounded_2xl()
+                                        .bg(rgba(0x12131a75))
+                                        .border_1()
+                                        .border_color(rgba(0xffffff0f))
+                                        .text_size(px(13.))
+                                        .text_color(rgba(0xe8e7ebdd))
+                                        .prefix(
+                                            svg()
+                                                .path(LucideIcons::Search)
+                                                .size(px(16.))
+                                                .text_color(rgba(0xb9b7c1a3)),
+                                        ),
+                                ),
                             )
                     })
                     .when(state.compact, |toolbar| {

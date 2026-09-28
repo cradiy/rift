@@ -22,6 +22,12 @@ discovery. File commands cover inline rename, create, copy, paste, move, Trash
 and permanent deletion from Trash. Raster and SVG thumbnails are available in
 both views, and the provider-based Quick Look currently previews images.
 
+Keyboard navigation supports both conventional keys and Vim-style movement:
+arrow keys or `h/j/k/l` move the active item, Shift+arrow extends the selection,
+Enter/Ctrl+O/`o` opens it, Alt+Up/`u`/`-` goes to the parent directory, and
+Alt+Left/Alt+Right traverses directory history. Plain-letter bindings are
+disabled while searching or renaming.
+
 Rift currently targets Linux. GPUI, GPUI Effects, GPUI Platform and UIC are
 pulled from the same remote GPUI revision pinned in the workspace manifest.
 

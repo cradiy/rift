@@ -39,11 +39,15 @@ impl FileBrowser {
     ) {
         let input = cx.new(|cx| TextInput::new(cx).initial_value(name));
         let input_for_blur = input.clone();
-        let submit_subscription = cx.subscribe(&input, |browser, input, event: &InputEvent, cx| {
-            if matches!(event, InputEvent::Submit(_)) {
-                browser.commit_inline_rename(input.clone(), cx);
-            }
-        });
+        let submit_subscription = cx.subscribe_in(
+            &input,
+            window,
+            |browser, input, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::Submit(_)) {
+                    browser.commit_inline_rename(input.clone(), window, cx);
+                }
+            },
+        );
         let focus_handle = input.read(cx).focus_handle(cx);
         let blur_subscription = cx.on_blur(&focus_handle, window, move |browser, _, cx| {
             browser.cancel_inline_rename(input_for_blur.clone(), cx);
@@ -103,10 +107,12 @@ impl FileBrowser {
                 cx.stop_propagation();
             })
             .on_click(|_, _, cx| cx.stop_propagation())
-            .on_key_down(move |event: &gpui::KeyDownEvent, _, cx| {
+            .on_key_down(move |event: &gpui::KeyDownEvent, window, cx| {
                 browser.update(cx, |browser, cx| {
                     if event.keystroke.key == "escape" {
-                        browser.cancel_inline_rename(input_for_escape.clone(), cx);
+                        if browser.cancel_inline_rename(input_for_escape.clone(), cx) {
+                            cx.focus_self(window);
+                        }
                         cx.stop_propagation();
                     }
                 });
@@ -119,7 +125,7 @@ impl FileBrowser {
         &mut self,
         expected_input: Entity<TextInput>,
         cx: &mut gpui::Context<Self>,
-    ) {
+    ) -> bool {
         if self
             .inline_rename
             .as_ref()
@@ -127,6 +133,9 @@ impl FileBrowser {
         {
             self.inline_rename = None;
             cx.notify();
+            true
+        } else {
+            false
         }
     }
 
@@ -139,6 +148,7 @@ impl FileBrowser {
     fn commit_inline_rename(
         &mut self,
         expected_input: Entity<TextInput>,
+        window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) {
         let Some(rename) = self.inline_rename.as_ref() else {
@@ -161,6 +171,7 @@ impl FileBrowser {
         if name == old_name {
             self.inline_rename = None;
             cx.notify();
+            cx.focus_self(window);
             return;
         }
         let Some(parent) = source.parent() else {
@@ -171,6 +182,7 @@ impl FileBrowser {
         let controller: Entity<BrowserController> = self.controller.clone();
         self.inline_rename = None;
         cx.notify();
+        cx.focus_self(window);
         Self::run_operation(
             controller,
             FileOperation::Rename {

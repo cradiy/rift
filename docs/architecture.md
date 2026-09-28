@@ -40,9 +40,9 @@ Owns framework-independent file-manager policy:
 - filesystem command types such as `FileOperation` and structured errors.
 
 Directory reads use request IDs. Results from an older asynchronous request
-cannot replace a newer directory or navigation snapshot. The selected paths
-live in `BrowserState`, including atomic selection replacement for marquee
-selection.
+cannot replace a newer directory or navigation snapshot. The selected paths,
+active item and range-selection anchor live in `BrowserState`, including atomic
+selection replacement for marquee and keyboard range selection.
 
 ### `rift-fs`
 
@@ -116,6 +116,11 @@ visible rows are laid out. Marquee hit testing consumes those measured bounds,
 so it remains compatible with virtualization and scrolling. Grid/list scroll
 positions, inline-edit state and marquee geometry are view-local; durable
 selection and browser settings remain in `BrowserState`.
+
+Keyboard navigation is resolved against the same presented item order used by
+the active view. Grid movement uses measured column count and grouped-row
+geometry; list movement stays vertical. The search and inline-rename inputs add
+an `editing` key context so plain-letter Vim bindings never consume text input.
 
 ## State and operation flows
 

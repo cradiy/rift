@@ -85,6 +85,7 @@ pub(crate) struct FileBrowser {
     rendered_directory_request: Option<u64>,
     rendered_show_hidden_files: bool,
     rendered_item_count: usize,
+    rendered_active_selection: Option<PathBuf>,
     grid_columns: usize,
     grid_grouped: bool,
     marquee_selection: Option<MarqueeSelection>,
@@ -132,6 +133,7 @@ impl FileBrowser {
             rendered_directory_request: None,
             rendered_show_hidden_files: false,
             rendered_item_count: 0,
+            rendered_active_selection: None,
             grid_columns: 1,
             grid_grouped: false,
             marquee_selection: None,
@@ -308,6 +310,7 @@ impl FileBrowser {
             can_go_forward,
             can_go_up,
             current_directory,
+            active_selection,
             load_state,
             all_items,
             sort,
@@ -323,6 +326,7 @@ impl FileBrowser {
                 state.can_go_forward(),
                 state.can_go_up(),
                 state.current_directory().to_path_buf(),
+                state.active_selection().map(PathBuf::from),
                 state.load_state().clone(),
                 present_browser(state),
                 state.sort(),
@@ -343,6 +347,18 @@ impl FileBrowser {
                 .filter(|item| item.name.to_lowercase().contains(&normalized_query))
                 .collect()
         };
+        if self.rendered_active_selection != active_selection {
+            self.rendered_active_selection = active_selection.clone();
+            if let Some(path) = active_selection {
+                let browser = cx.entity();
+                cx.defer(move |cx| {
+                    browser.update(cx, |browser, cx| {
+                        browser.reveal_path(&path, cx);
+                        cx.notify();
+                    });
+                });
+            }
+        }
         let directory_changed = self.rendered_directory != current_directory;
         let hidden_policy_changed = self.rendered_show_hidden_files != show_hidden_files;
         let request_id = match &load_state {
@@ -610,6 +626,21 @@ impl Render for FileBrowser {
             .key_context(key_context)
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::open_selection))
+            .on_action(cx.listener(Self::move_selection_left))
+            .on_action(cx.listener(Self::move_selection_right))
+            .on_action(cx.listener(Self::move_selection_up))
+            .on_action(cx.listener(Self::move_selection_down))
+            .on_action(cx.listener(Self::extend_selection_left))
+            .on_action(cx.listener(Self::extend_selection_right))
+            .on_action(cx.listener(Self::extend_selection_up))
+            .on_action(cx.listener(Self::extend_selection_down))
+            .on_action(cx.listener(Self::select_first_item))
+            .on_action(cx.listener(Self::select_last_item))
+            .on_action(cx.listener(Self::select_previous_page))
+            .on_action(cx.listener(Self::select_next_page))
+            .on_action(cx.listener(Self::go_to_parent_directory))
+            .on_action(cx.listener(Self::go_back_directory))
+            .on_action(cx.listener(Self::go_forward_directory))
             .on_action(cx.listener(Self::quick_look_selection))
             .on_action(cx.listener(Self::rename_selection))
             .on_action(cx.listener(Self::get_info_selection))
