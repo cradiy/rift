@@ -103,7 +103,6 @@ pub(crate) fn init(cx: &mut App) {
         KeyBinding::new("ctrl-shift-n", NewFolder, context),
         KeyBinding::new("ctrl-a", SelectAllItems, context),
         KeyBinding::new("ctrl-h", ToggleHiddenFiles, context),
-        KeyBinding::new("escape", ClearSelection, context),
         KeyBinding::new("delete", TrashItems, context),
         KeyBinding::new("shift-delete", PermanentlyDeleteItems, context),
     ]);

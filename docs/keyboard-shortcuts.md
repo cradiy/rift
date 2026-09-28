@@ -26,7 +26,6 @@ file name.
 | F5 or Ctrl + R | Refresh the directory |
 | Alt + Up | Open the parent directory |
 | Alt + Left / Alt + Right | Move backward / forward through directory history |
-| Escape | Clear the selection |
 
 Mouse selection supports Shift or Ctrl for toggling multiple items.
 
