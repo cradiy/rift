@@ -79,6 +79,8 @@ interface:
 
 - `app.rs` loads configuration, initializes logging/UIC, creates the window and
   injects `LocalFileSystem` plus `SystemNavigationSource`;
+- `app/tabs.rs` owns the window's browser tabs, active-tab routing and tab
+  shortcuts; each tab retains an independent `FileBrowser` entity;
 - `config.rs` maps persisted browser preferences to core state and serializes
   updates through a dedicated background writer so UI interactions never wait
   on configuration I/O;
@@ -111,6 +113,18 @@ file_browser/
 ├── inline_rename.rs  persistent UIC TextInput lifecycle for in-place rename
 └── which_key.rs      multi-key Vim prefix state, hints and text-copy commands
 ```
+
+`RiftApp` retains every tab's `FileBrowser` entity and renders only the active
+one. Directory history, selection, search input, inline editing and scroll state
+therefore survive tab switches without becoming window-global. The tab strip is
+hidden for a single tab; multiple tabs share its available width and can be
+reordered with a rail-locked drag preview plus spring-animated slots. Cancelling
+an in-strip drag restores the original order. Pulling a tab away promotes the
+drag to the Linux system drag protocol and transfers the existing `FileBrowser`
+entity into a new Rift window on release, preserving its complete live state.
+Dropping over a Rift tab strip can attach it back to the source or merge it into
+another existing window. Navigation locations, filesystem access and the
+file-copy buffer remain shared by windows created from the same session.
 
 Grid and list views use independent `ListState` and scrollbar state. Only
 visible rows are laid out. Marquee hit testing consumes those measured bounds,
@@ -162,9 +176,10 @@ UI action or context-menu item
 ```
 
 The controller copy buffer stores source paths only for the current process.
-Paste performs `CopyInto`; Move uses an explicit destination. Trash and
-permanent deletion are separate operations, and permanent deletion is exposed
-only while browsing Trash.
+It is shared by every tab and any window detached from them, so a selection
+copied in one browser can be pasted in another. Paste performs `CopyInto`;
+Move uses an explicit destination. Trash and permanent deletion are separate
+operations, and permanent deletion is exposed only while browsing Trash.
 
 ### Sidebar discovery
 

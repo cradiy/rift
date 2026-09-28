@@ -16,7 +16,7 @@ use std::{
 };
 
 use gpui::{
-    Animation, AnimationExt as _, Bounds, Entity, FocusHandle, Focusable, IntoElement,
+    Animation, AnimationExt as _, App, Bounds, Entity, FocusHandle, Focusable, IntoElement,
     ListAlignment, ListState, MouseButton, MouseDownEvent, Pixels, Point, Render, Window, div,
     point, prelude::*, px, rgb, rgba, svg,
 };
@@ -40,11 +40,13 @@ use self::inline_rename::InlineRenameState;
 use self::toolbar::ToolbarState;
 use self::which_key::WhichKeyState;
 
-const SIDEBAR_WIDTH: f32 = 300.0;
-const SIDEBAR_ANIMATION_DURATION: Duration = Duration::from_millis(230);
+pub(crate) const SIDEBAR_WIDTH: f32 = 300.0;
+pub(crate) const TAB_BAR_HEIGHT: f32 = 42.0;
+pub(crate) const TOOLBAR_HEIGHT: f32 = 72.0;
+pub(crate) const SIDEBAR_ANIMATION_DURATION: Duration = Duration::from_millis(230);
 const MARQUEE_DRAG_THRESHOLD: f32 = 3.0;
 
-fn sidebar_animation_easing(phase: f32) -> f32 {
+pub(crate) fn sidebar_animation_easing(phase: f32) -> f32 {
     1.0 - (1.0 - phase).powi(3)
 }
 
@@ -82,6 +84,7 @@ pub(crate) struct FileBrowser {
     focus_handle: FocusHandle,
     sidebar_visible: bool,
     sidebar_animated: bool,
+    tab_bar_visible: bool,
     inline_rename: Option<InlineRenameState>,
     vim_trash_confirmation: Option<Vec<PathBuf>>,
     which_key: WhichKeyState,
@@ -98,6 +101,44 @@ pub(crate) struct FileBrowser {
 }
 
 impl FileBrowser {
+    pub(crate) fn current_directory(&self, cx: &App) -> PathBuf {
+        self.controller
+            .read(cx)
+            .state()
+            .current_directory()
+            .to_path_buf()
+    }
+
+    pub(crate) fn tab_title(&self, cx: &App) -> String {
+        let controller = self.controller.read(cx);
+        let state = controller.state();
+        if state.is_trash() {
+            return "Trash".to_owned();
+        }
+        state
+            .current_directory()
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| state.current_directory().display().to_string())
+    }
+
+    pub(crate) fn sidebar_visible(&self) -> bool {
+        self.sidebar_visible
+    }
+
+    pub(crate) fn sidebar_is_animating(&self) -> bool {
+        self.sidebar_animated
+    }
+
+    pub(crate) fn set_tab_bar_visible(&mut self, visible: bool, cx: &mut gpui::Context<Self>) {
+        if self.tab_bar_visible == visible {
+            return;
+        }
+        self.tab_bar_visible = visible;
+        cx.notify();
+    }
+
     pub(crate) fn new(
         controller: Entity<BrowserController>,
         navigation: Entity<NavigationController>,
@@ -133,6 +174,7 @@ impl FileBrowser {
             focus_handle,
             sidebar_visible,
             sidebar_animated: false,
+            tab_bar_visible: false,
             inline_rename: None,
             vim_trash_confirmation: None,
             which_key: WhichKeyState::default(),
@@ -445,6 +487,9 @@ impl FileBrowser {
                 },
                 cx,
             ))
+            .when(self.tab_bar_visible, |content| {
+                content.child(div().h(px(TAB_BAR_HEIGHT)).flex_none())
+            })
             .child(
                 div()
                     .relative()

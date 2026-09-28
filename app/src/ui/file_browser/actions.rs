@@ -593,7 +593,7 @@ impl FileBrowser {
         let (sources, directory) = {
             let controller = self.controller.read(cx);
             (
-                controller.clipboard().to_vec(),
+                controller.clipboard(),
                 controller.state().current_directory().to_path_buf(),
             )
         };

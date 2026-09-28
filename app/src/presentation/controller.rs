@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
 use gpui::{AppContext, Context, Task};
 use rift_core::{
@@ -11,15 +14,30 @@ use crate::config::AppConfig;
 pub(crate) struct BrowserController {
     state: BrowserState,
     file_system: Arc<dyn FileSystem>,
-    clipboard: Vec<std::path::PathBuf>,
+    clipboard: SharedFileClipboard,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct SharedFileClipboard(Arc<Mutex<Vec<PathBuf>>>);
+
+impl SharedFileClipboard {
+    fn read(&self) -> std::sync::MutexGuard<'_, Vec<PathBuf>> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 }
 
 impl BrowserController {
-    pub(crate) fn new(state: BrowserState, file_system: Arc<dyn FileSystem>) -> Self {
+    pub(crate) fn with_clipboard(
+        state: BrowserState,
+        file_system: Arc<dyn FileSystem>,
+        clipboard: SharedFileClipboard,
+    ) -> Self {
         Self {
             state,
             file_system,
-            clipboard: Vec::new(),
+            clipboard,
         }
     }
 
@@ -44,26 +62,30 @@ impl BrowserController {
     }
 
     pub(crate) fn copy_selected(&mut self) -> usize {
-        self.clipboard = self.selected_paths();
-        self.clipboard.len()
+        let selected = self.selected_paths();
+        let count = selected.len();
+        *self.clipboard.read() = selected;
+        count
     }
 
     pub(crate) fn copy_selection(&mut self, fallback: std::path::PathBuf) -> usize {
         let selected = self.selected_paths();
-        self.clipboard = if selected.contains(&fallback) && !selected.is_empty() {
+        let clipboard = if selected.contains(&fallback) && !selected.is_empty() {
             selected
         } else {
             vec![fallback]
         };
-        self.clipboard.len()
+        let count = clipboard.len();
+        *self.clipboard.read() = clipboard;
+        count
     }
 
-    pub(crate) fn clipboard(&self) -> &[std::path::PathBuf] {
-        &self.clipboard
+    pub(crate) fn clipboard(&self) -> Vec<PathBuf> {
+        self.clipboard.read().clone()
     }
 
     pub(crate) fn forget_clipboard_paths(&mut self, paths: &[std::path::PathBuf]) {
-        self.clipboard.retain(|path| !paths.contains(path));
+        self.clipboard.read().retain(|path| !paths.contains(path));
     }
 
     pub(crate) fn perform(
@@ -136,5 +158,22 @@ impl BrowserController {
             });
         })
         .detach();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::SharedFileClipboard;
+
+    #[test]
+    fn cloned_file_clipboards_share_the_same_paths() {
+        let first = SharedFileClipboard::default();
+        let second = first.clone();
+
+        first.read().push(PathBuf::from("/tmp/copied"));
+
+        assert_eq!(second.read().as_slice(), [PathBuf::from("/tmp/copied")]);
     }
 }

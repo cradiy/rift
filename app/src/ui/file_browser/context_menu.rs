@@ -283,7 +283,7 @@ impl FileBrowser {
                     ContextMenuItem::action_with(
                         |_, _| Self::menu_label(LucideIcons::Copy, "Paste Items"),
                         move |_, cx| {
-                            let sources = paste_controller.read(cx).clipboard().to_vec();
+                            let sources = paste_controller.read(cx).clipboard();
                             Self::run_operation(
                                 paste_controller.clone(),
                                 FileOperation::CopyInto {
@@ -432,7 +432,7 @@ impl FileBrowser {
                 ContextMenuItem::action_with(
                     |_, _| Self::menu_label(LucideIcons::Copy, "Paste Into Folder"),
                     move |_, cx| {
-                        let sources = paste_controller.read(cx).clipboard().to_vec();
+                        let sources = paste_controller.read(cx).clipboard();
                         Self::run_operation(
                             paste_controller.clone(),
                             FileOperation::CopyInto {

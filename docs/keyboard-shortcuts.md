@@ -21,6 +21,10 @@ file name.
 | Ctrl + Shift + N | Create a folder |
 | Ctrl + A | Select all |
 | Ctrl + H | Show or hide hidden files |
+| Ctrl + T | Open a new tab at the current directory |
+| Ctrl + W | Close the active tab |
+| Ctrl + Tab / Ctrl + Shift + Tab | Select the next / previous tab |
+| Ctrl + Page Down / Ctrl + Page Up | Select the next / previous tab |
 | Delete | Move to Trash |
 | Shift + Delete | Permanently delete an item from Trash |
 | F5 or Ctrl + R | Refresh the directory |
@@ -37,6 +41,7 @@ the configuration file.
 | Shortcut | Action |
 | --- | --- |
 | `h` / `j` / `k` / `l` | Move left / down / up / right |
+| `H` / `L` | Select the previous / next tab |
 | `o` | Open the selected item |
 | `u` or `-` | Open the parent directory |
 | `gg` / `G` | Select the first / last item |

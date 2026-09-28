@@ -453,7 +453,7 @@ impl FileBrowser {
         let address_bar =
             self.address_bar(state.current_directory, state.is_trash, state.compact, cx);
         div()
-            .h(px(72.))
+            .h(px(super::TOOLBAR_HEIGHT))
             .px(px(19.))
             .flex()
             .items_center()
