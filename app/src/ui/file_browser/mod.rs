@@ -81,6 +81,7 @@ pub(crate) struct FileBrowser {
     sidebar_visible: bool,
     sidebar_animated: bool,
     inline_rename: Option<InlineRenameState>,
+    vim_trash_confirmation: Option<Vec<PathBuf>>,
     rendered_directory: std::path::PathBuf,
     rendered_directory_request: Option<u64>,
     rendered_show_hidden_files: bool,
@@ -106,6 +107,7 @@ impl FileBrowser {
         let search_input = cx.new(|cx| TextInput::new(cx).placeholder("Search"));
         cx.subscribe(&search_input, |browser, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change(_)) {
+                browser.vim_trash_confirmation = None;
                 browser.grid_scroll.reset(browser.grid_scroll.item_count());
                 browser.list_scroll.reset(browser.list_scroll.item_count());
                 browser.controller.update(cx, |controller, cx| {
@@ -129,6 +131,7 @@ impl FileBrowser {
             sidebar_visible,
             sidebar_animated: false,
             inline_rename: None,
+            vim_trash_confirmation: None,
             rendered_directory: std::path::PathBuf::new(),
             rendered_directory_request: None,
             rendered_show_hidden_files: false,
@@ -337,6 +340,12 @@ impl FileBrowser {
         };
         let search_query = self.search_input.read(cx).value().trim().to_owned();
         let selection_status = selection_status(&all_items);
+        if self.vim_trash_confirmation.as_ref().is_some_and(|paths| {
+            let selected = self.controller.read(cx).selected_paths();
+            selected.len() != paths.len() || selected.iter().any(|path| !paths.contains(path))
+        }) {
+            self.vim_trash_confirmation = None;
+        }
         let all_item_count = all_items.len();
         let items = if search_query.is_empty() {
             all_items
@@ -374,6 +383,7 @@ impl FileBrowser {
         }
         if directory_changed {
             self.rendered_directory = current_directory.clone();
+            self.vim_trash_confirmation = None;
             self.marquee_selection = None;
             self.grid_scroll.reset(self.grid_scroll.item_count());
             self.list_scroll.reset(self.list_scroll.item_count());
@@ -522,6 +532,7 @@ impl FileBrowser {
                 all_item_count,
                 !search_query.is_empty(),
                 selection_status,
+                self.vim_trash_confirmation.as_deref(),
                 &load_state,
             ))
             .into_any_element()
@@ -532,8 +543,98 @@ impl FileBrowser {
         all_item_count: usize,
         search_active: bool,
         selection_status: Option<String>,
+        vim_trash_confirmation: Option<&[PathBuf]>,
         load_state: &LoadState,
-    ) -> impl IntoElement {
+    ) -> gpui::AnyElement {
+        if let (LoadState::Idle, Some(paths)) = (load_state, vim_trash_confirmation) {
+            return div()
+                .h(px(44.))
+                .px(px(16.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .gap(px(12.))
+                .border_t_1()
+                .border_color(rgba(0xff69697a))
+                .bg(rgba(0x321e26f2))
+                .text_color(rgba(0xfff3f3f2))
+                .child(
+                    div()
+                        .size(px(27.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_full()
+                        .bg(rgba(0xff5f6429))
+                        .child(
+                            svg()
+                                .path(LucideIcons::Trash2)
+                                .size(px(15.))
+                                .text_color(rgba(0xff7777ff)),
+                        ),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .child(vim_trash_confirmation_status(paths.len())),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.))
+                        .child(
+                            div()
+                                .min_w(px(24.))
+                                .h(px(23.))
+                                .px(px(7.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded(px(6.))
+                                .border_1()
+                                .border_color(rgba(0xff8a8ab8))
+                                .bg(rgba(0xff656533))
+                                .text_xs()
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .child("Y"),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_weight(gpui::FontWeight::MEDIUM)
+                                .text_color(rgba(0xffb9b9e8))
+                                .child("Confirm"),
+                        ),
+                )
+                .child(div().w(px(1.)).h(px(18.)).bg(rgba(0xffffff20)))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.))
+                        .child(
+                            div()
+                                .h(px(23.))
+                                .px(px(7.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded(px(6.))
+                                .border_1()
+                                .border_color(rgba(0xffffff24))
+                                .bg(rgba(0xffffff0e))
+                                .text_xs()
+                                .font_weight(gpui::FontWeight::MEDIUM)
+                                .text_color(rgba(0xe8e6edcc))
+                                .child("N / Esc"),
+                        )
+                        .child(div().text_xs().text_color(rgba(0xc7c4ceaa)).child("Cancel")),
+                )
+                .into_any_element();
+        }
+
         let status = match load_state {
             LoadState::Loading { .. } => "Loading".to_owned(),
             LoadState::Failed { .. } => "Unavailable".to_owned(),
@@ -554,6 +655,7 @@ impl FileBrowser {
             .text_xs()
             .text_color(rgba(0xc3c1c99c))
             .child(div().max_w(px(480.)).truncate().child(status))
+            .into_any_element()
     }
 }
 
@@ -573,12 +675,21 @@ fn selection_status(items: &[BrowserItem]) -> Option<String> {
     Some(format!("{} items selected", 2 + selected.count()))
 }
 
+fn vim_trash_confirmation_status(item_count: usize) -> String {
+    let noun = if item_count == 1 { "item" } else { "items" };
+    format!("Move {item_count} {noun} to Trash?")
+}
+
 fn items_are_empty(load_state: &LoadState, item_count: usize) -> bool {
     item_count == 0 && matches!(load_state, LoadState::Idle)
 }
 
 impl Render for FileBrowser {
     fn render(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        let vim_mode = AppConfig::vim_mode(cx);
+        if !vim_mode {
+            self.vim_trash_confirmation = None;
+        }
         let sidebar = self.sidebar(cx);
         let content = self.content(window, cx);
         let visible = self.sidebar_visible;
@@ -616,10 +727,16 @@ impl Render for FileBrowser {
                 .left(px(if visible { SIDEBAR_WIDTH } else { 0.0 }))
                 .into_any_element()
         };
-        let key_context = if self.inline_rename.is_some() {
-            "FileBrowser editing"
-        } else {
-            "FileBrowser"
+        let key_context = match (
+            self.inline_rename.is_some(),
+            vim_mode,
+            self.vim_trash_confirmation.is_some(),
+        ) {
+            (true, true, _) => "FileBrowser editing vim",
+            (true, false, _) => "FileBrowser editing",
+            (false, true, true) => "FileBrowser vim trash_confirm",
+            (false, true, false) => "FileBrowser vim",
+            (false, false, _) => "FileBrowser",
         };
         div()
             .relative()
@@ -647,9 +764,14 @@ impl Render for FileBrowser {
             .on_action(cx.listener(Self::copy_items))
             .on_action(cx.listener(Self::paste_items))
             .on_action(cx.listener(Self::trash_items))
+            .on_action(cx.listener(Self::request_vim_trash))
+            .on_action(cx.listener(Self::confirm_vim_trash))
+            .on_action(cx.listener(Self::cancel_vim_trash))
+            .on_action(cx.listener(Self::vim_trash_immediately))
             .on_action(cx.listener(Self::permanently_delete_items))
             .on_action(cx.listener(Self::refresh_directory))
             .on_action(cx.listener(Self::new_folder))
+            .on_action(cx.listener(Self::add_item))
             .on_action(cx.listener(Self::select_all_items))
             .on_action(cx.listener(Self::clear_selection))
             .on_action(cx.listener(Self::toggle_hidden_files))
@@ -673,7 +795,7 @@ mod tests {
 
     use rift_core::domain::EntryCategory;
 
-    use super::{BrowserItem, selection_status};
+    use super::{BrowserItem, selection_status, vim_trash_confirmation_status};
     use crate::presentation::ItemIcon;
 
     fn item(name: &str, is_directory: bool, size: &str, selected: bool) -> BrowserItem {
@@ -719,5 +841,11 @@ mod tests {
             selection_status(&[folder, file]).as_deref(),
             Some("2 items selected")
         );
+    }
+
+    #[test]
+    fn vim_trash_confirmation_status_uses_the_selected_item_count() {
+        assert_eq!(vim_trash_confirmation_status(1), "Move 1 item to Trash?");
+        assert_eq!(vim_trash_confirmation_status(3), "Move 3 items to Trash?");
     }
 }

@@ -145,6 +145,14 @@ impl FileBrowser {
         .into_any_element()
     }
 
+    fn settings_toolbar_button(&self, id: &'static str) -> gpui::AnyElement {
+        let button = Self::toolbar_button(id, LucideIcons::Ellipsis);
+        ContextMenuTrigger::new(button, |_, _| Self::settings_context_menu())
+            .alignment(ContextMenuAlignment::End)
+            .gap(px(6.))
+            .into_any_element()
+    }
+
     fn new_folder_toolbar_button(
         &self,
         enabled: bool,
@@ -531,8 +539,7 @@ impl FileBrowser {
                                 vec![
                                     self.new_folder_toolbar_button(!state.is_trash, cx),
                                     self.delete_toolbar_button(state.has_selection, cx),
-                                    Self::toolbar_button("more", LucideIcons::Ellipsis)
-                                        .into_any_element(),
+                                    self.settings_toolbar_button("more"),
                                 ],
                             ))
                             .child(
@@ -561,10 +568,7 @@ impl FileBrowser {
                     .when(state.compact, |toolbar| {
                         toolbar.child(Self::toolbar_group(
                             "compact-controls",
-                            vec![
-                                Self::toolbar_button("compact-more", LucideIcons::Ellipsis)
-                                    .into_any_element(),
-                            ],
+                            vec![self.settings_toolbar_button("compact-more")],
                         ))
                     }),
             )

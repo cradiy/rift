@@ -3,7 +3,7 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use gpui::{BorrowAppContext, Global};
+use gpui::{App, BorrowAppContext, Global};
 use rift_config::{
     BrowserConfig, BrowserSortDirection, BrowserSortField, BrowserViewMode, LoadedConfig,
 };
@@ -169,6 +169,16 @@ impl AppConfig {
         });
     }
 
+    pub(crate) fn vim_mode(cx: &App) -> bool {
+        cx.global::<Self>().loaded.config.browser.vim_mode
+    }
+
+    pub(crate) fn update_vim_mode(cx: &mut impl BorrowAppContext, vim_mode: bool) {
+        Self::update_browser_config(cx, |browser| {
+            browser.vim_mode = vim_mode;
+        });
+    }
+
     fn update_browser_config(
         cx: &mut impl BorrowAppContext,
         update: impl FnOnce(&mut BrowserConfig),
@@ -205,6 +215,7 @@ mod tests {
                     directories_first: false,
                     show_hidden_files: true,
                     sidebar_visible: false,
+                    vim_mode: true,
                 },
                 ..RiftConfig::default()
             },

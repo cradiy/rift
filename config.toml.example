@@ -16,3 +16,4 @@ sort_direction = "ascending"
 directories_first = true
 show_hidden_files = false
 sidebar_visible = true
+vim_mode = false

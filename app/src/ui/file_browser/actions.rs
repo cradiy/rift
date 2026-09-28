@@ -21,9 +21,14 @@ actions!(
         CopyItems,
         PasteItems,
         TrashItems,
+        RequestVimTrash,
+        ConfirmVimTrash,
+        CancelVimTrash,
+        VimTrashImmediately,
         PermanentlyDeleteItems,
         RefreshDirectory,
         NewFolder,
+        AddItem,
         SelectAllItems,
         ClearSelection,
         ToggleHiddenFiles,
@@ -63,36 +68,25 @@ struct GridNavigationRow {
 }
 
 pub(crate) fn init(cx: &mut App) {
-    let context = Some("FileBrowser && !editing");
+    let context = Some("FileBrowser && !editing && !trash_confirm");
     cx.bind_keys([
         KeyBinding::new("enter", OpenSelection, context),
         KeyBinding::new("ctrl-o", OpenSelection, context),
-        KeyBinding::new("o", OpenSelection, context),
         KeyBinding::new("alt-up", GoToParentDirectory, context),
-        KeyBinding::new("u", GoToParentDirectory, context),
-        KeyBinding::new("-", GoToParentDirectory, context),
         KeyBinding::new("alt-left", GoBackDirectory, context),
         KeyBinding::new("alt-right", GoForwardDirectory, context),
         KeyBinding::new("left", MoveSelectionLeft, context),
-        KeyBinding::new("h", MoveSelectionLeft, context),
         KeyBinding::new("right", MoveSelectionRight, context),
-        KeyBinding::new("l", MoveSelectionRight, context),
         KeyBinding::new("up", MoveSelectionUp, context),
-        KeyBinding::new("k", MoveSelectionUp, context),
         KeyBinding::new("down", MoveSelectionDown, context),
-        KeyBinding::new("j", MoveSelectionDown, context),
         KeyBinding::new("shift-left", ExtendSelectionLeft, context),
         KeyBinding::new("shift-right", ExtendSelectionRight, context),
         KeyBinding::new("shift-up", ExtendSelectionUp, context),
         KeyBinding::new("shift-down", ExtendSelectionDown, context),
         KeyBinding::new("home", SelectFirstItem, context),
-        KeyBinding::new("g g", SelectFirstItem, context),
         KeyBinding::new("end", SelectLastItem, context),
-        KeyBinding::new("shift-g", SelectLastItem, context),
         KeyBinding::new("pageup", SelectPreviousPage, context),
-        KeyBinding::new("ctrl-u", SelectPreviousPage, context),
         KeyBinding::new("pagedown", SelectNextPage, context),
-        KeyBinding::new("ctrl-d", SelectNextPage, context),
         KeyBinding::new("space", QuickLookSelection, context),
         KeyBinding::new("f2", RenameSelection, context),
         KeyBinding::new("alt-enter", GetInfoSelection, context),
@@ -106,6 +100,31 @@ pub(crate) fn init(cx: &mut App) {
         KeyBinding::new("escape", ClearSelection, context),
         KeyBinding::new("delete", TrashItems, context),
         KeyBinding::new("shift-delete", PermanentlyDeleteItems, context),
+    ]);
+
+    let vim_context = Some("FileBrowser && vim && !editing && !trash_confirm");
+    cx.bind_keys([
+        KeyBinding::new("o", OpenSelection, vim_context),
+        KeyBinding::new("u", GoToParentDirectory, vim_context),
+        KeyBinding::new("-", GoToParentDirectory, vim_context),
+        KeyBinding::new("h", MoveSelectionLeft, vim_context),
+        KeyBinding::new("l", MoveSelectionRight, vim_context),
+        KeyBinding::new("k", MoveSelectionUp, vim_context),
+        KeyBinding::new("j", MoveSelectionDown, vim_context),
+        KeyBinding::new("g g", SelectFirstItem, vim_context),
+        KeyBinding::new("shift-g", SelectLastItem, vim_context),
+        KeyBinding::new("ctrl-u", SelectPreviousPage, vim_context),
+        KeyBinding::new("ctrl-d", SelectNextPage, vim_context),
+        KeyBinding::new("a", AddItem, vim_context),
+        KeyBinding::new("d", RequestVimTrash, vim_context),
+        KeyBinding::new("shift-d", VimTrashImmediately, vim_context),
+    ]);
+
+    let confirmation_context = Some("FileBrowser && vim && trash_confirm && !editing");
+    cx.bind_keys([
+        KeyBinding::new("y", ConfirmVimTrash, confirmation_context),
+        KeyBinding::new("n", CancelVimTrash, confirmation_context),
+        KeyBinding::new("escape", CancelVimTrash, confirmation_context),
     ]);
 }
 
@@ -590,6 +609,76 @@ impl FileBrowser {
         );
     }
 
+    pub(super) fn request_vim_trash(
+        &mut self,
+        _: &RequestVimTrash,
+        _: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if self.controller.read(cx).state().is_trash() {
+            return;
+        }
+        let paths = self.controller.read(cx).selected_paths();
+        if paths.is_empty() {
+            return;
+        }
+        self.vim_trash_confirmation = Some(paths);
+        cx.notify();
+    }
+
+    pub(super) fn confirm_vim_trash(
+        &mut self,
+        _: &ConfirmVimTrash,
+        _: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(paths) = self.vim_trash_confirmation.take() else {
+            return;
+        };
+        if self.controller.read(cx).state().is_trash() {
+            cx.notify();
+            return;
+        }
+        Self::run_operation(
+            self.controller.clone(),
+            FileOperation::Trash { paths },
+            "Moved to Trash",
+            cx,
+        );
+    }
+
+    pub(super) fn cancel_vim_trash(
+        &mut self,
+        _: &CancelVimTrash,
+        _: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if self.vim_trash_confirmation.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    pub(super) fn vim_trash_immediately(
+        &mut self,
+        _: &VimTrashImmediately,
+        _: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if self.controller.read(cx).state().is_trash() {
+            return;
+        }
+        let paths = self.controller.read(cx).selected_paths();
+        if paths.is_empty() {
+            return;
+        }
+        Self::run_operation(
+            self.controller.clone(),
+            FileOperation::Trash { paths },
+            "Moved to Trash",
+            cx,
+        );
+    }
+
     pub(super) fn permanently_delete_items(
         &mut self,
         _: &PermanentlyDeleteItems,
@@ -641,6 +730,24 @@ impl FileBrowser {
             window,
             cx,
         );
+    }
+
+    pub(super) fn add_item(
+        &mut self,
+        _: &AddItem,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if self.controller.read(cx).state().is_trash() {
+            return;
+        }
+        let directory = self
+            .controller
+            .read(cx)
+            .state()
+            .current_directory()
+            .to_path_buf();
+        Self::show_add_item_dialog(self.controller.clone(), directory, window, cx);
     }
 
     pub(super) fn select_all_items(

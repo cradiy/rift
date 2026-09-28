@@ -22,10 +22,14 @@ discovery. File commands cover inline rename, create, copy, paste, move, Trash
 and permanent deletion from Trash. Raster and SVG thumbnails are available in
 both views, and the provider-based Quick Look currently previews images.
 
-Keyboard navigation supports both conventional keys and Vim-style movement:
-arrow keys or `h/j/k/l` move the active item, Shift+arrow extends the selection,
-Enter/Ctrl+O/`o` opens it, Alt+Up/`u`/`-` goes to the parent directory, and
-Alt+Left/Alt+Right traverses directory history. Plain-letter bindings are
+Keyboard navigation always supports arrow keys, Shift+arrow range selection,
+Enter/Ctrl+O to open, Alt+Up for the parent directory, and Alt+Left/Alt+Right
+for directory history. Optional Vim mode is disabled by default and can be
+toggled from the toolbar `…` menu or with `browser.vim_mode` in the TOML file.
+It adds `h/j/k/l`, `o`, `u`, `-`, `gg`, `G`, Ctrl+U/Ctrl+D, `a`, `d` and `D`.
+The `a` dialog creates a file normally or a folder when the name ends with
+`/`. Lowercase `d` waits for `y` confirmation before moving the selection to
+Trash; uppercase `D` moves it immediately. Plain-letter bindings remain
 disabled while searching or renaming.
 
 Rift currently targets Linux. GPUI, GPUI Effects, GPUI Platform and UIC are

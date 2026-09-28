@@ -18,17 +18,28 @@ use uic::{
 };
 
 use crate::{
-    presentation::{BrowserController, BrowserItem},
+    presentation::{BrowserController, BrowserItem, present_browser},
     ui::theme,
 };
 
 use super::FileBrowser;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum NewItemKind {
     Directory,
     Text,
     Markdown,
+}
+
+fn parse_add_item_name(value: &str) -> Result<(String, NewItemKind), &'static str> {
+    let value = value.trim();
+    let (name, kind) = if let Some(name) = value.strip_suffix('/') {
+        (name.trim(), NewItemKind::Directory)
+    } else {
+        (value, NewItemKind::Text)
+    };
+    validate_file_name(name)?;
+    Ok((name.to_owned(), kind))
 }
 
 impl FileBrowser {
@@ -92,6 +103,52 @@ impl FileBrowser {
                 Self::run_operation(controller.clone(), operation, "Item created", cx);
                 true
             });
+        modal::show(theme::style_modal(modal.w(px(430.))), window, cx);
+        window.focus(&input.read(cx).focus_handle(cx), cx);
+    }
+
+    pub(super) fn show_add_item_dialog(
+        controller: Entity<BrowserController>,
+        parent: PathBuf,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let input = cx.new(|cx| TextInput::new(cx).placeholder("name.txt or folder/"));
+        let input_for_content = input.clone();
+        let input_for_submit = input.clone();
+        let modal = Modal::new(move |_, _| {
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(9.))
+                .child(Self::name_field(input_for_content.clone(), "Name"))
+                .child(
+                    div()
+                        .text_size(px(11.5))
+                        .text_color(rgba(0xb9bdc997))
+                        .child("End the name with / to create a folder."),
+                )
+        })
+        .title_text("Add Item")
+        .ok_label("Create")
+        .cancel_label("Cancel")
+        .on_ok(move |_, cx| {
+            let value = input_for_submit.read(cx).value();
+            let (name, kind) = match parse_add_item_name(&value) {
+                Ok(item) => item,
+                Err(message) => {
+                    toast::error(message, cx);
+                    return false;
+                }
+            };
+            let path = parent.join(name);
+            let operation = match kind {
+                NewItemKind::Directory => FileOperation::CreateDirectory { path },
+                NewItemKind::Text | NewItemKind::Markdown => FileOperation::CreateFile { path },
+            };
+            Self::run_operation(controller.clone(), operation, "Item created", cx);
+            true
+        });
         modal::show(theme::style_modal(modal.w(px(430.))), window, cx);
         window.focus(&input.read(cx).focus_handle(cx), cx);
     }
@@ -353,7 +410,19 @@ impl FileBrowser {
             }
             _ => None,
         };
-        let select_affected_path = matches!(&operation, FileOperation::Rename { .. });
+        let selection_after_removal = removed_paths.as_deref().and_then(|removed_paths| {
+            let ordered_paths = present_browser(controller.read(cx).state())
+                .into_iter()
+                .map(|item| item.path)
+                .collect::<Vec<_>>();
+            successor_after_removal(&ordered_paths, removed_paths)
+        });
+        let select_affected_path = matches!(
+            &operation,
+            FileOperation::Rename { .. }
+                | FileOperation::CreateDirectory { .. }
+                | FileOperation::CreateFile { .. }
+        );
         let task = controller.update(cx, |controller, cx| controller.perform(operation, cx));
         cx.spawn(async move |cx| {
             let result = task.await;
@@ -363,7 +432,9 @@ impl FileBrowser {
                         if let Some(paths) = removed_paths.as_deref() {
                             controller.forget_clipboard_paths(paths);
                         }
-                        let message = if select_affected_path {
+                        let message = if let Some(path) = selection_after_removal {
+                            BrowserMessage::RefreshSelecting(path)
+                        } else if select_affected_path {
                             affected_paths
                                 .into_iter()
                                 .next()
@@ -382,6 +453,28 @@ impl FileBrowser {
     }
 }
 
+fn successor_after_removal(
+    ordered_paths: &[PathBuf],
+    removed_paths: &[PathBuf],
+) -> Option<PathBuf> {
+    let last_removed = ordered_paths
+        .iter()
+        .enumerate()
+        .filter_map(|(index, path)| removed_paths.contains(path).then_some(index))
+        .next_back()?;
+
+    ordered_paths[last_removed + 1..]
+        .iter()
+        .find(|path| !removed_paths.contains(path))
+        .or_else(|| {
+            ordered_paths[..last_removed]
+                .iter()
+                .rev()
+                .find(|path| !removed_paths.contains(path))
+        })
+        .cloned()
+}
+
 pub(super) fn validate_file_name(name: &str) -> Result<(), &'static str> {
     if name.is_empty() {
         return Err("Name cannot be empty");
@@ -394,4 +487,43 @@ pub(super) fn validate_file_name(name: &str) -> Result<(), &'static str> {
         return Err("Name cannot contain a path separator");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::{NewItemKind, parse_add_item_name, successor_after_removal};
+
+    #[test]
+    fn add_item_uses_a_trailing_slash_only_for_directories() {
+        assert_eq!(
+            parse_add_item_name("notes.md"),
+            Ok(("notes.md".to_owned(), NewItemKind::Text))
+        );
+        assert_eq!(
+            parse_add_item_name("Projects/"),
+            Ok(("Projects".to_owned(), NewItemKind::Directory))
+        );
+        assert!(parse_add_item_name("nested/file/").is_err());
+        assert!(parse_add_item_name("/").is_err());
+    }
+
+    #[test]
+    fn deletion_selects_the_next_item_or_falls_back_to_the_previous_one() {
+        let paths = ["a", "b", "c", "d"].map(PathBuf::from);
+
+        assert_eq!(
+            successor_after_removal(&paths, &[PathBuf::from("b")]),
+            Some(PathBuf::from("c"))
+        );
+        assert_eq!(
+            successor_after_removal(&paths, &[PathBuf::from("d")]),
+            Some(PathBuf::from("c"))
+        );
+        assert_eq!(
+            successor_after_removal(&paths, &[PathBuf::from("b"), PathBuf::from("c")]),
+            Some(PathBuf::from("d"))
+        );
+    }
 }

@@ -121,6 +121,12 @@ Keyboard navigation is resolved against the same presented item order used by
 the active view. Grid movement uses measured column count and grouped-row
 geometry; list movement stays vertical. The search and inline-rename inputs add
 an `editing` key context so plain-letter Vim bindings never consume text input.
+The persisted `browser.vim_mode` preference adds a separate `vim` key context;
+ordinary bindings remain available independently of that preference. A pending
+lowercase-`d` Trash request is view-local and adds a `trash_confirm` context, so
+only `y`, `n` and Escape are accepted until the request is confirmed or
+cancelled. Uppercase `D` bypasses that confirmation without changing the normal
+Delete/Shift+Delete behavior.
 
 ## State and operation flows
 

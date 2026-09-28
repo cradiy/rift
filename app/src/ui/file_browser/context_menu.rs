@@ -12,11 +12,13 @@ use uic::{
         context_menu::{
             ContextMenu, ContextMenuAppearance, ContextMenuItem, ContextMenuSurfaceState,
         },
+        selection::Switch,
         toast,
     },
 };
 
 use crate::{
+    config::AppConfig,
     presentation::{BrowserController, BrowserItem, NavigationController},
     ui::{quick_look, theme},
 };
@@ -24,6 +26,38 @@ use crate::{
 use super::{FileBrowser, file_actions::NewItemKind};
 
 impl FileBrowser {
+    pub(super) fn settings_context_menu() -> ContextMenu {
+        Self::style_context_menu(
+            ContextMenu::new().item(
+                ContextMenuItem::action_with(
+                    |_, cx| {
+                        let enabled = AppConfig::vim_mode(cx);
+                        div()
+                            .w_full()
+                            .flex()
+                            .items_center()
+                            .gap(px(9.))
+                            .child(
+                                svg()
+                                    .path(LucideIcons::Keyboard)
+                                    .size(px(15.))
+                                    .text_color(rgba(0xece8f2d6)),
+                            )
+                            .child("Vim Mode")
+                            .child(div().flex_1())
+                            .child(Switch::new("vim-mode-setting", enabled).label("Vim Mode"))
+                    },
+                    |_, cx| {
+                        let enabled = AppConfig::vim_mode(cx);
+                        AppConfig::update_vim_mode(cx, !enabled);
+                        cx.refresh_windows();
+                    },
+                )
+                .keep_open(true),
+            ),
+        )
+    }
+
     pub(super) fn sort_context_menu(
         controller: Entity<BrowserController>,
         sort: SortSpec,

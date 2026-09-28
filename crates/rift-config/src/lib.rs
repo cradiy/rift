@@ -74,6 +74,7 @@ pub struct BrowserConfig {
     pub directories_first: bool,
     pub show_hidden_files: bool,
     pub sidebar_visible: bool,
+    pub vim_mode: bool,
 }
 
 impl Default for BrowserConfig {
@@ -85,6 +86,7 @@ impl Default for BrowserConfig {
             directories_first: true,
             show_hidden_files: false,
             sidebar_visible: true,
+            vim_mode: false,
         }
     }
 }
@@ -309,6 +311,7 @@ mod tests {
 
         assert_eq!(loaded.path, path);
         assert_eq!(loaded.config.logging.level, LogLevel::Info);
+        assert!(!loaded.config.browser.vim_mode);
         assert!(loaded.path.exists());
     }
 
@@ -365,6 +368,7 @@ mod tests {
             directories_first: false,
             show_hidden_files: true,
             sidebar_visible: false,
+            vim_mode: true,
         };
 
         loaded.save().unwrap();
@@ -372,6 +376,7 @@ mod tests {
         let contents = fs::read_to_string(&path).unwrap();
         let reloaded = LoadedConfig::load_or_create(path).unwrap();
         assert!(contents.contains("[browser]"));
+        assert!(contents.contains("vim_mode = true"));
         assert_eq!(reloaded.config, loaded.config);
     }
 
