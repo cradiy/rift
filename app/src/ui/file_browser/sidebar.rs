@@ -13,7 +13,10 @@ use uic::assets::LucideIcons;
 
 use crate::{presentation::BrowserController, ui::theme};
 
-use super::{FileBrowser, SIDEBAR_ANIMATION_DURATION, SIDEBAR_WIDTH, sidebar_animation_easing};
+use super::{
+    FileBrowser, FileDrag, SIDEBAR_ANIMATION_DURATION, SIDEBAR_WIDTH, drop_files_into,
+    sidebar_animation_easing, trash_dragged_files,
+};
 
 impl FileBrowser {
     fn sidebar_header(&mut self, cx: &mut gpui::Context<Self>) -> gpui::AnyElement {
@@ -93,6 +96,9 @@ impl FileBrowser {
         cx: &mut gpui::Context<Self>,
     ) -> gpui::AnyElement {
         let path = location.path().to_path_buf();
+        let trash_target = location.kind() == LocationKind::Trash;
+        let drop_path = path.clone();
+        let drop_controller = controller.clone();
         let selected = selected_path == Some(path.as_path());
         let id = SharedString::from(format!("location:{}", path.display()));
         div()
@@ -115,6 +121,30 @@ impl FileBrowser {
             .when(selected, |row| row.bg(rgba(0x3a39488f)))
             .when(!selected, |row| {
                 row.hover(|style| style.bg(rgba(0xffffff14)))
+            })
+            .when(!trash_target, |row| {
+                row.drag_over::<FileDrag>(|style, _, _, _| {
+                    style
+                        .bg(rgba(0x36aee838))
+                        .border_1()
+                        .border_color(rgba(0x68cff671))
+                })
+                .on_drop(move |drag: &FileDrag, window, cx| {
+                    cx.stop_propagation();
+                    drop_files_into(drag, drop_path.clone(), drop_controller.clone(), window, cx);
+                })
+            })
+            .when(trash_target, |row| {
+                row.drag_over::<FileDrag>(|style, _, _, _| {
+                    style
+                        .bg(rgba(0xff4f5830))
+                        .border_1()
+                        .border_color(rgba(0xff737388))
+                })
+                .on_drop(move |drag: &FileDrag, _, cx| {
+                    cx.stop_propagation();
+                    trash_dragged_files(drag, cx);
+                })
             })
             .on_click(cx.listener(move |_, _, _, cx| {
                 controller.update(cx, |controller, cx| {

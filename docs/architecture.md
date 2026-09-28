@@ -110,6 +110,7 @@ file_browser/
 ├── context_menu.rs   item/blank-area UIC menus and submenus
 ├── actions.rs        Linux key bindings and action dispatch
 ├── file_actions.rs   dialogs and asynchronous filesystem commands
+├── drag_drop.rs      file drag payloads, previews, validation and operations
 ├── inline_rename.rs  persistent UIC TextInput lifecycle for in-place rename
 └── which_key.rs      multi-key Vim prefix state, hints and text-copy commands
 ```
@@ -180,6 +181,17 @@ It is shared by every tab and any window detached from them, so a selection
 copied in one browser can be pasted in another. Paste performs `CopyInto`;
 Move uses an explicit destination. Trash and permanent deletion are separate
 operations, and permanent deletion is exposed only while browsing Trash.
+
+File drag-and-drop reuses the same `FileOperation` boundary. Grid and list
+items create a typed `FileDrag` containing the current selection, source
+controller and source artwork. Folder tiles, breadcrumbs, sidebar locations,
+the content surface and browser tabs resolve that payload to a destination.
+Drops move by default, copy while Control is held, and reject self/descendant
+targets before starting filesystem work. The drag remains inside GPUI while it
+is within a window for smooth pointer tracking; only reaching a window edge
+promotes it to the Linux system drag protocol so another Rift window can
+receive it. This protocol currently remains process-local and does not export
+files to unrelated applications.
 
 ### Sidebar discovery
 

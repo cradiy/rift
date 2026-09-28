@@ -22,8 +22,8 @@ use crate::{
     config::{AppConfig, BrowserPreferences},
     presentation::{BrowserController, NavigationController, SharedFileClipboard},
     ui::file_browser::{
-        FileBrowser, SIDEBAR_ANIMATION_DURATION, SIDEBAR_WIDTH, TAB_BAR_HEIGHT, TOOLBAR_HEIGHT,
-        sidebar_animation_easing,
+        FileBrowser, FileDrag, SIDEBAR_ANIMATION_DURATION, SIDEBAR_WIDTH, TAB_BAR_HEIGHT,
+        TOOLBAR_HEIGHT, drop_files_into, sidebar_animation_easing,
     },
 };
 
@@ -699,6 +699,7 @@ impl RiftApp {
                     .drag
                     .as_ref()
                     .is_some_and(|drag| drag.tab_id == id);
+                let drop_browser = tab.browser.clone();
                 let left = self
                     .tab_strip
                     .slots
@@ -757,6 +758,17 @@ impl RiftApp {
                             .hover(|style| {
                                 style.bg(rgba(0xffffff09)).border_color(rgba(0xffffff0e))
                             })
+                    })
+                    .drag_over::<FileDrag>(|style, _, _, _| {
+                        style.bg(rgba(0x36aee82e)).border_color(rgba(0x68cff68f))
+                    })
+                    .on_drop(move |drag: &FileDrag, window, cx| {
+                        cx.stop_propagation();
+                        let (directory, controller) = {
+                            let browser = drop_browser.read(cx);
+                            (browser.current_directory(cx), browser.controller_entity())
+                        };
+                        drop_files_into(drag, directory, controller, window, cx);
                     })
                     .on_mouse_down(
                         MouseButton::Middle,

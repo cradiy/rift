@@ -1,5 +1,6 @@
 mod actions;
 mod context_menu;
+mod drag_drop;
 mod file_actions;
 mod files;
 mod inline_rename;
@@ -8,6 +9,7 @@ mod toolbar;
 mod which_key;
 
 pub(crate) use actions::init as init_key_bindings;
+pub(crate) use drag_drop::{FileDrag, drop_files_into, file_drag_preview, trash_dragged_files};
 
 use std::{
     collections::{BTreeSet, HashMap},
@@ -101,6 +103,10 @@ pub(crate) struct FileBrowser {
 }
 
 impl FileBrowser {
+    pub(crate) fn controller_entity(&self) -> Entity<BrowserController> {
+        self.controller.clone()
+    }
+
     pub(crate) fn current_directory(&self, cx: &App) -> PathBuf {
         self.controller
             .read(cx)
@@ -454,6 +460,8 @@ impl FileBrowser {
         };
         let inline_rename = self.inline_rename_view();
         let marquee_bounds = self.marquee_bounds();
+        let content_drop_directory = current_directory.clone();
+        let content_drop_controller = self.controller.clone();
         let group_by_kind = sort.field == SortField::Kind;
         let content_width = if self.sidebar_visible {
             (window.bounds().size.width - px(SIDEBAR_WIDTH)).max(px(1.))
@@ -498,6 +506,19 @@ impl FileBrowser {
                     .overflow_hidden()
                     .flex()
                     .flex_col()
+                    .when(!is_trash, |body| {
+                        body.drag_over::<FileDrag>(|style, _, _, _| style.bg(rgba(0x2caee808)))
+                            .on_drop(move |drag: &FileDrag, window, cx| {
+                                cx.stop_propagation();
+                                drop_files_into(
+                                    drag,
+                                    content_drop_directory.clone(),
+                                    content_drop_controller.clone(),
+                                    window,
+                                    cx,
+                                );
+                            })
+                    })
                     .on_mouse_down(
                         MouseButton::Right,
                         cx.listener(|this, event: &gpui::MouseDownEvent, window, cx| {

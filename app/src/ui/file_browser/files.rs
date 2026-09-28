@@ -16,7 +16,7 @@ use crate::{
 };
 
 use super::{
-    FileBrowser, FolderCountState,
+    FileBrowser, FileDrag, FolderCountState, drop_files_into, file_drag_preview,
     inline_rename::{InlineRenameLayout, InlineRenameView},
 };
 
@@ -414,6 +414,9 @@ impl FileBrowser {
         let path = entry.path.clone();
         let is_directory = entry.is_directory;
         let selected = entry.selected;
+        let drag = FileDrag::for_entry(entry.clone(), controller.clone(), cx);
+        let drop_path = path.clone();
+        let drop_controller = controller.clone();
         let context_path = path.clone();
         let context_entry = entry.clone();
         let context_controller = controller.clone();
@@ -459,6 +462,15 @@ impl FileBrowser {
             })
             .when(!selected, |tile| {
                 tile.hover(|style| style.bg(rgba(0xffffff0c)))
+            })
+            .when(is_directory, |tile| {
+                tile.drag_over::<FileDrag>(|style, _, _, _| {
+                    style.bg(rgba(0x36aee82e)).border_color(rgba(0x68cff68f))
+                })
+                .on_drop(move |drag: &FileDrag, window, cx| {
+                    cx.stop_propagation();
+                    drop_files_into(drag, drop_path.clone(), drop_controller.clone(), window, cx);
+                })
             })
             .on_mouse_down(gpui::MouseButton::Left, move |_, window, cx| {
                 let focus_handle = click_browser.read(cx).focus_handle.clone();
@@ -511,6 +523,10 @@ impl FileBrowser {
                         cx,
                     );
                 });
+            })
+            .on_drag(drag, |drag, _, _, cx| {
+                drag.prepare_source_selection(cx);
+                file_drag_preview(drag, cx)
             })
             .child(if entry.is_directory {
                 FolderIcon::new()
@@ -724,6 +740,9 @@ impl FileBrowser {
         let context_path = path.clone();
         let context_entry = entry.clone();
         let context_selected = entry.selected;
+        let drag = FileDrag::for_entry(entry.clone(), controller.clone(), _cx);
+        let drop_path = path.clone();
+        let drop_controller = controller.clone();
         let context_controller = controller.clone();
         let context_browser = browser.clone();
         let click_browser = browser.clone();
@@ -741,6 +760,15 @@ impl FileBrowser {
             .when(entry.selected, |row| row.bg(rgba(0x3f78b66e)))
             .when(!entry.selected, |row| {
                 row.hover(|style| style.bg(rgba(0xffffff10)))
+            })
+            .when(is_directory, |row| {
+                row.drag_over::<FileDrag>(|style, _, _, _| {
+                    style.bg(rgba(0x36aee842)).border_color(rgba(0x68cff68f))
+                })
+                .on_drop(move |drag: &FileDrag, window, cx| {
+                    cx.stop_propagation();
+                    drop_files_into(drag, drop_path.clone(), drop_controller.clone(), window, cx);
+                })
             })
             .cursor_pointer()
             .on_mouse_down(gpui::MouseButton::Left, move |_, window, cx| {
@@ -794,6 +822,10 @@ impl FileBrowser {
                         cx,
                     );
                 });
+            })
+            .on_drag(drag, |drag, _, _, cx| {
+                drag.prepare_source_selection(cx);
+                file_drag_preview(drag, cx)
             })
             .child(
                 div()

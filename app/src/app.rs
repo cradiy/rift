@@ -3,9 +3,9 @@ mod tabs;
 use std::{process::ExitCode, sync::Arc};
 
 use gpui::{
-    App, AppContext, Bounds, Entity, Global, InteractiveElement, ParentElement, Pixels, Render,
-    SharedString, Styled, Window, WindowBounds, WindowHandle, WindowId, WindowOptions, div,
-    prelude::FluentBuilder, px, size,
+    App, AppContext, Bounds, DragMoveEvent, Entity, Global, InteractiveElement, ParentElement,
+    Pixels, Render, SharedString, Styled, SystemDragOptions, Window, WindowBounds, WindowHandle,
+    WindowId, WindowOptions, div, prelude::FluentBuilder, px, size,
 };
 use gpui_platform::application;
 use rift_core::ports::{FileSystem, NavigationSource};
@@ -23,6 +23,7 @@ use self::tabs::{BrowserTab, TabStripState};
 
 const DEFAULT_WINDOW_WIDTH: f32 = 1280.0;
 const DEFAULT_WINDOW_HEIGHT: f32 = 820.0;
+const FILE_DRAG_NATIVE_EDGE: f32 = 10.0;
 
 #[derive(Default)]
 struct RiftWindowRegistry {
@@ -166,6 +167,40 @@ impl RiftApp {
         app.open_tab(initial_directory, window, cx);
         app
     }
+
+    fn file_drag_moved(
+        &mut self,
+        event: &DragMoveEvent<crate::ui::file_browser::FileDrag>,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let drag = event.drag(cx).clone();
+        if drag.is_native() {
+            return;
+        }
+        drag.update_copy_modifier(event.event.modifiers.control);
+        let position = event.event.position;
+        let viewport = window.viewport_size();
+        if !file_drag_near_window_edge(
+            f32::from(position.x),
+            f32::from(position.y),
+            f32::from(viewport.width),
+            f32::from(viewport.height),
+        ) {
+            return;
+        }
+        match window.promote_active_drag_to_system_with_options(SystemDragOptions::default(), cx) {
+            Ok(_) => drag.mark_native(),
+            Err(error) => log::warn!("unable to promote file drag to the system: {error:#}"),
+        }
+    }
+}
+
+fn file_drag_near_window_edge(x: f32, y: f32, width: f32, height: f32) -> bool {
+    x <= FILE_DRAG_NATIVE_EDGE
+        || y <= FILE_DRAG_NATIVE_EDGE
+        || x >= width - FILE_DRAG_NATIVE_EDGE
+        || y >= height - FILE_DRAG_NATIVE_EDGE
 }
 
 impl Render for RiftApp {
@@ -203,6 +238,7 @@ impl Render for RiftApp {
             .on_action(cx.listener(Self::next_tab_action))
             .on_action(cx.listener(Self::previous_tab_action))
             .on_drag_move::<tabs::TabDrag>(cx.listener(Self::tab_drag_moved))
+            .on_drag_move::<crate::ui::file_browser::FileDrag>(cx.listener(Self::file_drag_moved))
             .on_drop(cx.listener(Self::dropped_as_window))
             .size_full()
             .relative()
@@ -234,5 +270,17 @@ impl Render for RiftApp {
         root.child(toast::layer(cx))
             .child(context_menu::layer(cx))
             .child(modal::layer(cx))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::file_drag_near_window_edge;
+
+    #[test]
+    fn file_drag_stays_internal_until_it_reaches_a_window_edge() {
+        assert!(!file_drag_near_window_edge(640.0, 410.0, 1280.0, 820.0));
+        assert!(file_drag_near_window_edge(1274.0, 410.0, 1280.0, 820.0));
+        assert!(file_drag_near_window_edge(640.0, 4.0, 1280.0, 820.0));
     }
 }

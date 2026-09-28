@@ -553,7 +553,7 @@ impl FileBrowser {
     }
 }
 
-fn successor_after_removal(
+pub(super) fn successor_after_removal(
     ordered_paths: &[PathBuf],
     removed_paths: &[PathBuf],
 ) -> Option<PathBuf> {
