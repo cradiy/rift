@@ -29,6 +29,12 @@ actions!(
         RefreshDirectory,
         NewFolder,
         AddItem,
+        StartCopyPrefix,
+        StartGoPrefix,
+        CopyFileNameText,
+        CopyFilePathText,
+        CopyParentDirectoryText,
+        CancelWhichKey,
         SelectAllItems,
         ClearSelection,
         ToggleHiddenFiles,
@@ -68,7 +74,7 @@ struct GridNavigationRow {
 }
 
 pub(crate) fn init(cx: &mut App) {
-    let context = Some("FileBrowser && !editing && !trash_confirm");
+    let context = Some("FileBrowser && !editing && !trash_confirm && !which_key");
     cx.bind_keys([
         KeyBinding::new("enter", OpenSelection, context),
         KeyBinding::new("ctrl-o", OpenSelection, context),
@@ -102,7 +108,7 @@ pub(crate) fn init(cx: &mut App) {
         KeyBinding::new("shift-delete", PermanentlyDeleteItems, context),
     ]);
 
-    let vim_context = Some("FileBrowser && vim && !editing && !trash_confirm");
+    let vim_context = Some("FileBrowser && vim && !editing && !trash_confirm && !which_key");
     cx.bind_keys([
         KeyBinding::new("o", OpenSelection, vim_context),
         KeyBinding::new("u", GoToParentDirectory, vim_context),
@@ -111,13 +117,28 @@ pub(crate) fn init(cx: &mut App) {
         KeyBinding::new("l", MoveSelectionRight, vim_context),
         KeyBinding::new("k", MoveSelectionUp, vim_context),
         KeyBinding::new("j", MoveSelectionDown, vim_context),
-        KeyBinding::new("g g", SelectFirstItem, vim_context),
+        KeyBinding::new("g", StartGoPrefix, vim_context),
         KeyBinding::new("shift-g", SelectLastItem, vim_context),
         KeyBinding::new("ctrl-u", SelectPreviousPage, vim_context),
         KeyBinding::new("ctrl-d", SelectNextPage, vim_context),
         KeyBinding::new("a", AddItem, vim_context),
+        KeyBinding::new("c", StartCopyPrefix, vim_context),
         KeyBinding::new("d", RequestVimTrash, vim_context),
         KeyBinding::new("shift-d", VimTrashImmediately, vim_context),
+    ]);
+
+    let copy_context = Some("FileBrowser && vim && copy_prefix && !editing && !trash_confirm");
+    cx.bind_keys([
+        KeyBinding::new("f", CopyFileNameText, copy_context),
+        KeyBinding::new("c", CopyFilePathText, copy_context),
+        KeyBinding::new("d", CopyParentDirectoryText, copy_context),
+        KeyBinding::new("escape", CancelWhichKey, copy_context),
+    ]);
+
+    let go_context = Some("FileBrowser && vim && which_key && go_prefix && !editing");
+    cx.bind_keys([
+        KeyBinding::new("g", SelectFirstItem, go_context),
+        KeyBinding::new("escape", CancelWhichKey, go_context),
     ]);
 
     let confirmation_context = Some("FileBrowser && vim && trash_confirm && !editing");
@@ -425,6 +446,7 @@ impl FileBrowser {
         _: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
+        self.cancel_which_key(cx);
         self.move_selection(NavigationDirection::First, false, cx);
     }
 
@@ -789,7 +811,7 @@ impl FileBrowser {
         Some((entry.path, entry.name, entry.is_directory))
     }
 
-    fn primary_item(&self, cx: &App) -> Option<BrowserItem> {
+    pub(super) fn primary_item(&self, cx: &App) -> Option<BrowserItem> {
         let controller = self.controller.read(cx);
         let state = controller.state();
         let items = present_browser(state);

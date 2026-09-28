@@ -59,6 +59,19 @@ pub(crate) fn info_glass() -> FrostedGlassAppearance {
     }
 }
 
+pub(crate) fn which_key_glass() -> FrostedGlassAppearance {
+    FrostedGlassAppearance {
+        blur_radius: px(16.),
+        saturation: 1.32,
+        brightness: 0.9,
+        tint: rgba(0x111827b0).into(),
+        edge: rgba(0x9edcfa52).into(),
+        edge_width: px(1.),
+        sheen: 0.026,
+        ..FrostedGlassAppearance::dark()
+    }
+}
+
 pub(crate) fn sidebar_glass() -> FrostedGlassAppearance {
     FrostedGlassAppearance {
         blur_radius: px(15.),

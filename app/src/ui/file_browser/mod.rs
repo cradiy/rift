@@ -5,6 +5,7 @@ mod files;
 mod inline_rename;
 mod sidebar;
 mod toolbar;
+mod which_key;
 
 pub(crate) use actions::init as init_key_bindings;
 
@@ -37,6 +38,7 @@ use crate::{
 use self::files::FileItemContext;
 use self::inline_rename::InlineRenameState;
 use self::toolbar::ToolbarState;
+use self::which_key::WhichKeyState;
 
 const SIDEBAR_WIDTH: f32 = 300.0;
 const SIDEBAR_ANIMATION_DURATION: Duration = Duration::from_millis(230);
@@ -82,6 +84,7 @@ pub(crate) struct FileBrowser {
     sidebar_animated: bool,
     inline_rename: Option<InlineRenameState>,
     vim_trash_confirmation: Option<Vec<PathBuf>>,
+    which_key: WhichKeyState,
     rendered_directory: std::path::PathBuf,
     rendered_directory_request: Option<u64>,
     rendered_show_hidden_files: bool,
@@ -132,6 +135,7 @@ impl FileBrowser {
             sidebar_animated: false,
             inline_rename: None,
             vim_trash_confirmation: None,
+            which_key: WhichKeyState::default(),
             rendered_directory: std::path::PathBuf::new(),
             rendered_directory_request: None,
             rendered_show_hidden_files: false,
@@ -211,6 +215,7 @@ impl FileBrowser {
         event: &MouseDownEvent,
         cx: &mut gpui::Context<Self>,
     ) {
+        self.cancel_which_key(cx);
         let initial_selection = self.controller.read(cx).state().selection().clone();
         let additive = event.modifiers.shift;
         self.marquee_selection = Some(MarqueeSelection {
@@ -357,6 +362,7 @@ impl FileBrowser {
                 .collect()
         };
         if self.rendered_active_selection != active_selection {
+            self.cancel_which_key(cx);
             self.rendered_active_selection = active_selection.clone();
             if let Some(path) = active_selection {
                 let browser = cx.entity();
@@ -384,6 +390,7 @@ impl FileBrowser {
         if directory_changed {
             self.rendered_directory = current_directory.clone();
             self.vim_trash_confirmation = None;
+            self.cancel_which_key(cx);
             self.marquee_selection = None;
             self.grid_scroll.reset(self.grid_scroll.item_count());
             self.list_scroll.reset(self.list_scroll.item_count());
@@ -690,8 +697,12 @@ impl Render for FileBrowser {
         if !vim_mode {
             self.vim_trash_confirmation = None;
         }
+        if !vim_mode || !self.focus_handle.is_focused(window) {
+            self.which_key.reset();
+        }
         let sidebar = self.sidebar(cx);
         let content = self.content(window, cx);
+        let which_key = self.render_which_key();
         let visible = self.sidebar_visible;
         let content_width = if visible {
             (window.bounds().size.width - px(SIDEBAR_WIDTH)).max(px(1.0))
@@ -731,17 +742,21 @@ impl Render for FileBrowser {
             self.inline_rename.is_some(),
             vim_mode,
             self.vim_trash_confirmation.is_some(),
+            self.which_key.context_token(),
         ) {
-            (true, true, _) => "FileBrowser editing vim",
-            (true, false, _) => "FileBrowser editing",
-            (false, true, true) => "FileBrowser vim trash_confirm",
-            (false, true, false) => "FileBrowser vim",
-            (false, false, _) => "FileBrowser",
+            (true, true, _, _) => "FileBrowser editing vim",
+            (true, false, _, _) => "FileBrowser editing",
+            (false, true, true, _) => "FileBrowser vim trash_confirm",
+            (false, true, false, Some("copy_prefix")) => "FileBrowser vim which_key copy_prefix",
+            (false, true, false, Some("go_prefix")) => "FileBrowser vim which_key go_prefix",
+            (false, true, false, _) => "FileBrowser vim",
+            (false, false, _, _) => "FileBrowser",
         };
         div()
             .relative()
             .key_context(key_context)
             .track_focus(&self.focus_handle)
+            .on_key_down(cx.listener(Self::handle_which_key_key_down))
             .on_action(cx.listener(Self::open_selection))
             .on_action(cx.listener(Self::move_selection_left))
             .on_action(cx.listener(Self::move_selection_right))
@@ -772,6 +787,12 @@ impl Render for FileBrowser {
             .on_action(cx.listener(Self::refresh_directory))
             .on_action(cx.listener(Self::new_folder))
             .on_action(cx.listener(Self::add_item))
+            .on_action(cx.listener(Self::start_copy_prefix))
+            .on_action(cx.listener(Self::start_go_prefix))
+            .on_action(cx.listener(Self::copy_file_name_text))
+            .on_action(cx.listener(Self::copy_file_path_text))
+            .on_action(cx.listener(Self::copy_parent_directory_text))
+            .on_action(cx.listener(Self::cancel_which_key_action))
             .on_action(cx.listener(Self::select_all_items))
             .on_action(cx.listener(Self::clear_selection))
             .on_action(cx.listener(Self::toggle_hidden_files))
@@ -780,6 +801,7 @@ impl Render for FileBrowser {
             .bg(rgb(0x20222e))
             .child(sidebar)
             .child(content_frame)
+            .children(which_key)
     }
 }
 

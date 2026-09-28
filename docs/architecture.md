@@ -108,7 +108,8 @@ file_browser/
 ├── context_menu.rs   item/blank-area UIC menus and submenus
 ├── actions.rs        Linux key bindings and action dispatch
 ├── file_actions.rs   dialogs and asynchronous filesystem commands
-└── inline_rename.rs  persistent UIC TextInput lifecycle for in-place rename
+├── inline_rename.rs  persistent UIC TextInput lifecycle for in-place rename
+└── which_key.rs      multi-key Vim prefix state, hints and text-copy commands
 ```
 
 Grid and list views use independent `ListState` and scrollbar state. Only
@@ -126,7 +127,10 @@ ordinary bindings remain available independently of that preference. A pending
 lowercase-`d` Trash request is view-local and adds a `trash_confirm` context, so
 only `y`, `n` and Escape are accepted until the request is confirmed or
 cancelled. Uppercase `D` bypasses that confirmation without changing the normal
-Delete/Shift+Delete behavior.
+Delete/Shift+Delete behavior. Multi-key Vim commands enter a dedicated
+`which_key` context after their first key. Prefix-specific contexts prevent a
+continuation such as `cd` from falling through to the single-key `d` action;
+the delayed panel is generated from the same prefix definitions.
 
 ## State and operation flows
 
