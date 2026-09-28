@@ -9,6 +9,12 @@ use crate::domain::Entry;
 pub trait FileSystem: Send + Sync + 'static {
     fn read_directory(&self, path: &Path) -> Result<Vec<Entry>, FileSystemError>;
 
+    fn count_directory_items(
+        &self,
+        path: &Path,
+        include_hidden: bool,
+    ) -> Result<usize, FileSystemError>;
+
     fn perform(&self, operation: FileOperation) -> Result<FileOperationResult, FileSystemError>;
 }
 
@@ -48,6 +54,7 @@ pub struct FileOperationResult {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FileSystemOperation {
     ReadDirectory,
+    CountDirectoryItems,
     ReadMetadata,
     Rename,
     CreateDirectory,

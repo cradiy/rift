@@ -75,6 +75,16 @@ impl BrowserController {
         cx.background_spawn(async move { file_system.perform(operation) })
     }
 
+    pub(crate) fn count_directory_items(
+        &self,
+        path: std::path::PathBuf,
+        include_hidden: bool,
+        cx: &Context<Self>,
+    ) -> Task<Result<usize, FileSystemError>> {
+        let file_system = self.file_system.clone();
+        cx.background_spawn(async move { file_system.count_directory_items(&path, include_hidden) })
+    }
+
     pub(crate) fn dispatch(&mut self, message: BrowserMessage, cx: &mut Context<Self>) {
         let preferences_changed = matches!(
             &message,

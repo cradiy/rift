@@ -16,7 +16,7 @@ use crate::{
 };
 
 use super::{
-    FileBrowser,
+    FileBrowser, FolderCountState,
     inline_rename::{InlineRenameLayout, InlineRenameView},
 };
 
@@ -383,7 +383,7 @@ impl FileBrowser {
         controller: Entity<BrowserController>,
         browser: Entity<FileBrowser>,
         inline_rename: Option<InlineRenameView>,
-        _cx: &mut gpui::App,
+        cx: &mut gpui::App,
     ) -> gpui::AnyElement {
         let icon = Self::entry_icon(&entry);
         let path = entry.path.clone();
@@ -393,7 +393,30 @@ impl FileBrowser {
         let context_entry = entry.clone();
         let context_controller = controller.clone();
         let context_browser = browser.clone();
+        let click_browser = browser.clone();
         let entry_rename = Self::inline_rename_for(inline_rename, &path);
+        let detail = if entry.is_directory {
+            let key = browser
+                .read(cx)
+                .folder_count_key(entry.path.clone(), entry.modified_at);
+            match browser.read(cx).folder_count(&key) {
+                Some(FolderCountState::Ready(1)) => "1 item".to_owned(),
+                Some(FolderCountState::Ready(count)) => format!("{count} items"),
+                Some(FolderCountState::Unavailable) => "—".to_owned(),
+                Some(FolderCountState::Loading) => "…".to_owned(),
+                None => {
+                    let count_browser = browser.clone();
+                    cx.defer(move |cx| {
+                        count_browser.update(cx, |browser, cx| {
+                            browser.request_folder_count(key, cx);
+                        });
+                    });
+                    "…".to_owned()
+                }
+            }
+        } else {
+            entry.detail.clone()
+        };
         div()
             .id(SharedString::from(format!("grid:{}", path.display())))
             .w(px(122.))
@@ -412,7 +435,10 @@ impl FileBrowser {
             .when(!selected, |tile| {
                 tile.hover(|style| style.bg(rgba(0xffffff0c)))
             })
-            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+            .on_mouse_down(gpui::MouseButton::Left, move |_, _, cx| {
+                click_browser.update(cx, |browser, cx| {
+                    browser.cancel_active_inline_rename(cx);
+                });
                 cx.stop_propagation();
             })
             .on_mouse_down(
@@ -498,9 +524,7 @@ impl FileBrowser {
                     .items_center()
                     .text_xs()
                     .text_color(rgba(0x30a9e6c2))
-                    .when(!(show_category && entry.is_directory), |detail| {
-                        detail.child(entry.detail)
-                    }),
+                    .child(detail),
             )
             .into_any_element()
     }
@@ -580,6 +604,7 @@ impl FileBrowser {
             .flex_col()
             .on_mouse_down(MouseButton::Left, move |event, _, cx| {
                 browser.update(cx, |browser, cx| {
+                    browser.cancel_active_inline_rename(cx);
                     browser.begin_marquee_selection(event, cx);
                 });
                 cx.stop_propagation();
@@ -672,6 +697,7 @@ impl FileBrowser {
         let context_selected = entry.selected;
         let context_controller = controller.clone();
         let context_browser = browser.clone();
+        let click_browser = browser.clone();
         let entry_rename = Self::inline_rename_for(inline_rename, &path);
         div()
             .id(SharedString::from(format!("list:{}", path.display())))
@@ -688,7 +714,10 @@ impl FileBrowser {
                 row.hover(|style| style.bg(rgba(0xffffff10)))
             })
             .cursor_pointer()
-            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+            .on_mouse_down(gpui::MouseButton::Left, move |_, _, cx| {
+                click_browser.update(cx, |browser, cx| {
+                    browser.cancel_active_inline_rename(cx);
+                });
                 cx.stop_propagation();
             })
             .on_mouse_down(
@@ -859,6 +888,7 @@ impl FileBrowser {
                     .min_h_0()
                     .on_mouse_down(MouseButton::Left, move |event, _, cx| {
                         browser.update(cx, |browser, cx| {
+                            browser.cancel_active_inline_rename(cx);
                             browser.begin_marquee_selection(event, cx);
                         });
                         cx.stop_propagation();

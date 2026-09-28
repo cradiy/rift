@@ -68,6 +68,34 @@ impl FileSystem for LocalFileSystem {
         Ok(entries)
     }
 
+    fn count_directory_items(
+        &self,
+        path: &Path,
+        include_hidden: bool,
+    ) -> Result<usize, FileSystemError> {
+        let directory = fs::read_dir(path).map_err(|error| {
+            FileSystemError::new(
+                FileSystemOperation::CountDirectoryItems,
+                path,
+                error.to_string(),
+            )
+        })?;
+        let mut count = 0;
+        for item in directory {
+            let item = item.map_err(|error| {
+                FileSystemError::new(
+                    FileSystemOperation::CountDirectoryItems,
+                    path,
+                    error.to_string(),
+                )
+            })?;
+            if include_hidden || !item.file_name().to_string_lossy().starts_with('.') {
+                count += 1;
+            }
+        }
+        Ok(count)
+    }
+
     fn perform(&self, operation: FileOperation) -> Result<FileOperationResult, FileSystemError> {
         match operation {
             FileOperation::Rename {
@@ -427,6 +455,27 @@ mod tests {
             entries
                 .iter()
                 .any(|entry| entry.name().to_string_lossy() == "Cargo.toml")
+        );
+    }
+
+    #[test]
+    fn counts_directory_items_with_the_requested_hidden_file_policy() {
+        let root = tempfile::tempdir().expect("temporary directory");
+        fs::write(root.path().join("visible.txt"), "visible").unwrap();
+        fs::write(root.path().join(".hidden.txt"), "hidden").unwrap();
+        fs::create_dir(root.path().join("folder")).unwrap();
+
+        assert_eq!(
+            LocalFileSystem
+                .count_directory_items(root.path(), false)
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            LocalFileSystem
+                .count_directory_items(root.path(), true)
+                .unwrap(),
+            3
         );
     }
 

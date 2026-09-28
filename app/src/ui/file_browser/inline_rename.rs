@@ -46,7 +46,7 @@ impl FileBrowser {
         });
         let focus_handle = input.read(cx).focus_handle(cx);
         let blur_subscription = cx.on_blur(&focus_handle, window, move |browser, _, cx| {
-            browser.commit_inline_rename(input_for_blur.clone(), cx);
+            browser.cancel_inline_rename(input_for_blur.clone(), cx);
         });
 
         self.inline_rename = Some(InlineRenameState {
@@ -126,6 +126,12 @@ impl FileBrowser {
             .is_some_and(|rename| rename.input.entity_id() == expected_input.entity_id())
         {
             self.inline_rename = None;
+            cx.notify();
+        }
+    }
+
+    pub(super) fn cancel_active_inline_rename(&mut self, cx: &mut gpui::Context<Self>) {
+        if self.inline_rename.take().is_some() {
             cx.notify();
         }
     }

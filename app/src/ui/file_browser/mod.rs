@@ -8,7 +8,11 @@ mod toolbar;
 
 pub(crate) use actions::init as init_key_bindings;
 
-use std::{collections::BTreeSet, path::PathBuf, time::Duration};
+use std::{
+    collections::{BTreeSet, HashMap},
+    path::PathBuf,
+    time::{Duration, SystemTime},
+};
 
 use gpui::{
     Animation, AnimationExt as _, Bounds, Entity, FocusHandle, Focusable, IntoElement,
@@ -51,6 +55,20 @@ pub(super) struct MarqueeSelection {
     active: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(super) struct FolderCountKey {
+    path: PathBuf,
+    modified_at: Option<SystemTime>,
+    include_hidden: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) enum FolderCountState {
+    Loading,
+    Ready(usize),
+    Unavailable,
+}
+
 pub(crate) struct FileBrowser {
     pub(super) controller: Entity<BrowserController>,
     pub(super) navigation: Entity<NavigationController>,
@@ -64,10 +82,14 @@ pub(crate) struct FileBrowser {
     sidebar_animated: bool,
     inline_rename: Option<InlineRenameState>,
     rendered_directory: std::path::PathBuf,
+    rendered_directory_request: Option<u64>,
+    rendered_show_hidden_files: bool,
     rendered_item_count: usize,
     grid_columns: usize,
     grid_grouped: bool,
     marquee_selection: Option<MarqueeSelection>,
+    folder_counts: HashMap<FolderCountKey, FolderCountState>,
+    folder_count_generation: u64,
 }
 
 impl FileBrowser {
@@ -107,11 +129,76 @@ impl FileBrowser {
             sidebar_animated: false,
             inline_rename: None,
             rendered_directory: std::path::PathBuf::new(),
+            rendered_directory_request: None,
+            rendered_show_hidden_files: false,
             rendered_item_count: 0,
             grid_columns: 1,
             grid_grouped: false,
             marquee_selection: None,
+            folder_counts: HashMap::new(),
+            folder_count_generation: 0,
         }
+    }
+
+    fn invalidate_folder_counts(&mut self) {
+        self.folder_counts.clear();
+        self.folder_count_generation = self.folder_count_generation.wrapping_add(1);
+    }
+
+    pub(super) fn folder_count_key(
+        &self,
+        path: PathBuf,
+        modified_at: Option<SystemTime>,
+    ) -> FolderCountKey {
+        FolderCountKey {
+            path,
+            modified_at,
+            include_hidden: self.rendered_show_hidden_files,
+        }
+    }
+
+    pub(super) fn folder_count(&self, key: &FolderCountKey) -> Option<FolderCountState> {
+        self.folder_counts.get(key).copied()
+    }
+
+    pub(super) fn request_folder_count(
+        &mut self,
+        key: FolderCountKey,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if self.folder_counts.contains_key(&key) {
+            return;
+        }
+        self.folder_counts
+            .insert(key.clone(), FolderCountState::Loading);
+        let generation = self.folder_count_generation;
+        let path = key.path.clone();
+        let include_hidden = key.include_hidden;
+        let count = self.controller.update(cx, |controller, cx| {
+            controller.count_directory_items(path, include_hidden, cx)
+        });
+
+        cx.spawn(async move |this, cx| {
+            let result = count.await;
+            let Some(this) = this.upgrade() else {
+                return;
+            };
+            this.update(cx, |browser, cx| {
+                if browser.folder_count_generation != generation {
+                    return;
+                }
+                let state = match result {
+                    Ok(count) => FolderCountState::Ready(count),
+                    Err(error) => {
+                        log::debug!("unable to count directory items: {error}");
+                        FolderCountState::Unavailable
+                    }
+                };
+                browser.folder_counts.insert(key, state);
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     pub(super) fn begin_marquee_selection(
@@ -256,7 +343,20 @@ impl FileBrowser {
                 .filter(|item| item.name.to_lowercase().contains(&normalized_query))
                 .collect()
         };
-        if self.rendered_directory != current_directory {
+        let directory_changed = self.rendered_directory != current_directory;
+        let hidden_policy_changed = self.rendered_show_hidden_files != show_hidden_files;
+        let request_id = match &load_state {
+            LoadState::Loading { request_id, .. } => Some(*request_id),
+            _ => None,
+        };
+        let directory_reloaded =
+            request_id.is_some() && self.rendered_directory_request != request_id;
+        if directory_changed || hidden_policy_changed || directory_reloaded {
+            self.rendered_show_hidden_files = show_hidden_files;
+            self.rendered_directory_request = request_id.or(self.rendered_directory_request);
+            self.invalidate_folder_counts();
+        }
+        if directory_changed {
             self.rendered_directory = current_directory.clone();
             self.marquee_selection = None;
             self.grid_scroll.reset(self.grid_scroll.item_count());
