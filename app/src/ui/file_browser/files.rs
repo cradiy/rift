@@ -435,10 +435,12 @@ impl FileBrowser {
             .when(!selected, |tile| {
                 tile.hover(|style| style.bg(rgba(0xffffff0c)))
             })
-            .on_mouse_down(gpui::MouseButton::Left, move |_, _, cx| {
+            .on_mouse_down(gpui::MouseButton::Left, move |_, window, cx| {
+                let focus_handle = click_browser.read(cx).focus_handle.clone();
                 click_browser.update(cx, |browser, cx| {
                     browser.cancel_active_inline_rename(cx);
                 });
+                window.focus(&focus_handle, cx);
                 cx.stop_propagation();
             })
             .on_mouse_down(
@@ -602,11 +604,13 @@ impl FileBrowser {
             .overflow_hidden()
             .flex()
             .flex_col()
-            .on_mouse_down(MouseButton::Left, move |event, _, cx| {
+            .on_mouse_down(MouseButton::Left, move |event, window, cx| {
+                let focus_handle = browser.read(cx).focus_handle.clone();
                 browser.update(cx, |browser, cx| {
                     browser.cancel_active_inline_rename(cx);
                     browser.begin_marquee_selection(event, cx);
                 });
+                window.focus(&focus_handle, cx);
                 cx.stop_propagation();
             })
             .on_mouse_move(move |event, _, cx| {
@@ -714,10 +718,12 @@ impl FileBrowser {
                 row.hover(|style| style.bg(rgba(0xffffff10)))
             })
             .cursor_pointer()
-            .on_mouse_down(gpui::MouseButton::Left, move |_, _, cx| {
+            .on_mouse_down(gpui::MouseButton::Left, move |_, window, cx| {
+                let focus_handle = click_browser.read(cx).focus_handle.clone();
                 click_browser.update(cx, |browser, cx| {
                     browser.cancel_active_inline_rename(cx);
                 });
+                window.focus(&focus_handle, cx);
                 cx.stop_propagation();
             })
             .on_mouse_down(
@@ -886,11 +892,13 @@ impl FileBrowser {
                     .relative()
                     .flex_1()
                     .min_h_0()
-                    .on_mouse_down(MouseButton::Left, move |event, _, cx| {
+                    .on_mouse_down(MouseButton::Left, move |event, window, cx| {
+                        let focus_handle = browser.read(cx).focus_handle.clone();
                         browser.update(cx, |browser, cx| {
                             browser.cancel_active_inline_rename(cx);
                             browser.begin_marquee_selection(event, cx);
                         });
+                        window.focus(&focus_handle, cx);
                         cx.stop_propagation();
                     })
                     .on_mouse_move(move |event, _, cx| {
