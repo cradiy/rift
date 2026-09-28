@@ -2,10 +2,12 @@ use std::path::{Component, Path, PathBuf};
 
 use gpui::{
     App, AppContext, Entity, Focusable, FontWeight, IntoElement, Styled, Window, div, prelude::*,
-    px, rgba, svg,
+    px, relative, rgba, svg,
 };
+use gpui_effects::FrostedGlass;
 use rift_core::{
     application::BrowserMessage,
+    domain::EntryCategory,
     ports::{FileOperation, FileOperationResult, FileSystemError},
 };
 use uic::{
@@ -19,7 +21,10 @@ use uic::{
 
 use crate::{
     presentation::{BrowserController, BrowserItem, present_browser},
-    ui::theme,
+    ui::{
+        components::{ImageThumbnail, ImageThumbnailLayout},
+        theme,
+    },
 };
 
 use super::FileBrowser;
@@ -207,63 +212,156 @@ impl FileBrowser {
     }
 
     pub(super) fn show_info(entry: BrowserItem, window: &mut Window, cx: &mut App) {
-        let icon = if entry.is_directory {
-            LucideIcons::FolderOpen
-        } else {
-            LucideIcons::File
+        let icon = match entry.category {
+            EntryCategory::Folder => LucideIcons::FolderOpen,
+            EntryCategory::Application => LucideIcons::AppWindow,
+            EntryCategory::Document => LucideIcons::FileText,
+            EntryCategory::Image => LucideIcons::Image,
+            EntryCategory::Audio => LucideIcons::Music,
+            EntryCategory::Video => LucideIcons::Film,
+            EntryCategory::Archive => LucideIcons::Archive,
+            EntryCategory::Code => LucideIcons::Code,
+            EntryCategory::Alias => LucideIcons::Link2,
+            EntryCategory::Other => LucideIcons::File,
         };
-        let title = format!("{} Info", entry.name);
+        let is_image = entry.category == EntryCategory::Image;
+        let preview_path = entry.path.clone();
+        let preview_modified = entry.modified_at;
+        let preview_byte_len = entry.byte_len;
+        let name = entry.name.clone();
+        let kind = entry.kind.clone();
+        let size = entry.size.clone();
+        let modified = entry.modified.clone();
+        let location = entry.path.parent().map_or_else(
+            || entry.path.display().to_string(),
+            |path| path.display().to_string(),
+        );
         let modal = Modal::new(move |_, _| {
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(16.))
+            let preview = if is_image {
+                ImageThumbnail::new(
+                    preview_path.clone(),
+                    preview_modified,
+                    preview_byte_len,
+                    ImageThumbnailLayout::Info,
+                )
+                .into_any_element()
+            } else {
+                div()
+                    .size(px(64.))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(15.))
+                    .border_1()
+                    .border_color(rgba(0x62c8ff35))
+                    .bg(rgba(0x42b8ec18))
+                    .child(svg().path(icon).size(px(30.)).text_color(rgba(0x60c8f4f2)))
+                    .into_any_element()
+            };
+
+            FrostedGlass::with_appearance(theme::info_glass())
+                .w(px(500.))
+                .max_w(relative(0.9))
+                .rounded(px(20.))
+                .overflow_hidden()
+                .text_color(rgba(0xf6f4f8f2))
+                .shadow(vec![
+                    gpui::BoxShadow::new(px(0.), px(26.), rgba(0x0000008c).into())
+                        .blur_radius(px(68.))
+                        .spread_radius(px(-12.)),
+                    gpui::BoxShadow::new(px(0.), px(1.), rgba(0xffffff1c).into())
+                        .blur_radius(px(1.)),
+                ])
                 .child(
                     div()
                         .flex()
                         .items_center()
-                        .gap(px(13.))
-                        .child(svg().path(icon).size(px(42.)).text_color(rgba(0x48b8e8e8)))
+                        .justify_between()
+                        .px(px(20.))
+                        .py(px(14.))
+                        .border_b_1()
+                        .border_color(rgba(0xffffff16))
                         .child(
                             div()
-                                .min_w_0()
+                                .text_size(px(13.))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(rgba(0xe8e5ecdc))
+                                .child("Get Info"),
+                        )
+                        .child(
+                            div()
+                                .id("close-info")
+                                .size(px(28.))
                                 .flex()
-                                .flex_col()
-                                .gap(px(2.))
+                                .items_center()
+                                .justify_center()
+                                .rounded_full()
+                                .cursor_pointer()
+                                .hover(|button| button.bg(rgba(0xffffff14)))
+                                .on_click(|_, window, cx| {
+                                    modal::dismiss(window, cx);
+                                    cx.stop_propagation();
+                                })
                                 .child(
-                                    div()
-                                        .truncate()
-                                        .text_size(px(16.))
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .child(entry.name.clone()),
-                                )
-                                .child(
-                                    div()
-                                        .text_size(px(12.))
-                                        .text_color(rgba(0xbfc2cc9e))
-                                        .child(entry.kind.clone()),
+                                    svg()
+                                        .path(LucideIcons::X)
+                                        .size(px(15.))
+                                        .text_color(rgba(0xd7d3dccc)),
                                 ),
                         ),
                 )
                 .child(
                     div()
-                        .rounded(px(10.))
-                        .border_1()
-                        .border_color(rgba(0xffffff16))
-                        .overflow_hidden()
-                        .child(Self::info_row("Size", entry.size.clone(), false))
-                        .child(Self::info_row("Modified", entry.modified.clone(), true))
-                        .child(Self::info_row(
-                            "Where",
-                            entry.path.display().to_string(),
-                            true,
-                        )),
+                        .p(px(20.))
+                        .flex()
+                        .flex_col()
+                        .gap(px(18.))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(14.))
+                                .child(preview)
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .flex()
+                                        .flex_col()
+                                        .gap(px(4.))
+                                        .child(
+                                            div()
+                                                .line_clamp(2)
+                                                .whitespace_normal()
+                                                .text_size(px(17.))
+                                                .font_weight(FontWeight::SEMIBOLD)
+                                                .child(name.clone()),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_size(px(12.))
+                                                .text_color(rgba(0xbfc3d0a6))
+                                                .child(kind.clone()),
+                                        ),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .rounded(px(13.))
+                                .border_1()
+                                .border_color(rgba(0xffffff18))
+                                .bg(rgba(0x080b1329))
+                                .overflow_hidden()
+                                .child(Self::info_row("Size", size.clone(), false))
+                                .child(Self::info_row("Modified", modified.clone(), true))
+                                .child(Self::info_row("Location", location.clone(), true)),
+                        ),
                 )
         })
-        .title_text(title)
-        .ok_label("Done")
-        .cancel_label("Cancel");
-        modal::show(theme::style_modal(modal.w(px(480.))), window, cx);
+        .appearance(theme::modal_appearance())
+        .hide_footer()
+        .unstyled();
+        modal::show(modal, window, cx);
     }
 
     pub(super) fn show_permanent_delete_confirmation(
@@ -373,19 +471,19 @@ impl FileBrowser {
 
     fn info_row(label: &'static str, value: String, border: bool) -> impl IntoElement {
         div()
-            .min_h(px(38.))
-            .px(px(11.))
-            .py(px(8.))
+            .min_h(px(43.))
+            .px(px(13.))
+            .py(px(10.))
             .flex()
-            .items_start()
+            .items_center()
             .when(border, |row| {
                 row.border_t_1().border_color(rgba(0xffffff12))
             })
-            .text_size(px(12.))
             .child(
                 div()
-                    .w(px(78.))
+                    .w(px(82.))
                     .flex_none()
+                    .text_size(px(11.5))
                     .text_color(rgba(0xbfc2cc99))
                     .child(label),
             )
@@ -393,6 +491,8 @@ impl FileBrowser {
                 div()
                     .flex_1()
                     .min_w_0()
+                    .truncate()
+                    .text_size(px(12.5))
                     .text_color(rgba(0xeeeef2df))
                     .child(value),
             )

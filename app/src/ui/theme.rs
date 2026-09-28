@@ -3,7 +3,35 @@ use gpui_effects::{FrostedGlassAppearance, LiquidGlassAppearance};
 use uic::components::{
     input::InputAppearance,
     modal::{Modal, ModalAppearance},
+    toast::{ToastAppearance, ToastColors},
 };
+
+pub(crate) fn toast_appearance() -> ToastAppearance {
+    ToastAppearance::default()
+        .colors(ToastColors {
+            info: rgba(0x62c8ffff).into(),
+            success: rgba(0x58d68dff).into(),
+            warn: rgba(0xffc857ff).into(),
+            error: rgba(0xff6b73ff).into(),
+            loading: rgba(0x62c8ffff).into(),
+        })
+        .gap(px(8.))
+        .viewport_margin(px(20.))
+        .max_w(px(440.))
+        .px(px(14.))
+        .py(px(10.))
+        .rounded(px(12.))
+        .border_1()
+        .border_color(rgba(0xffffff24))
+        .bg(rgba(0x191c28f5))
+        .text_color(rgba(0xf5f3f8f2))
+        .shadow(vec![
+            gpui::BoxShadow::new(px(0.), px(12.), rgba(0x00000070).into())
+                .blur_radius(px(32.))
+                .spread_radius(px(-8.)),
+            gpui::BoxShadow::new(px(0.), px(1.), rgba(0xffffff14).into()).blur_radius(px(1.)),
+        ])
+}
 
 pub(crate) fn context_menu_glass() -> FrostedGlassAppearance {
     FrostedGlassAppearance {
@@ -14,6 +42,19 @@ pub(crate) fn context_menu_glass() -> FrostedGlassAppearance {
         edge: rgba(0xc6d6f06b).into(),
         edge_width: px(1.),
         sheen: 0.025,
+        ..FrostedGlassAppearance::dark()
+    }
+}
+
+pub(crate) fn info_glass() -> FrostedGlassAppearance {
+    FrostedGlassAppearance {
+        blur_radius: px(18.),
+        saturation: 1.3,
+        brightness: 0.88,
+        tint: rgba(0x151a2a9c).into(),
+        edge: rgba(0xbfd5f05c).into(),
+        edge_width: px(1.),
+        sheen: 0.024,
         ..FrostedGlassAppearance::dark()
     }
 }

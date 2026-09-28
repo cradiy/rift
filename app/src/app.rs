@@ -45,6 +45,7 @@ pub fn run() -> ExitCode {
         .run(move |cx: &mut App| {
             cx.set_global(AppConfig::new(loaded_config.clone()));
             uic::init(cx);
+            crate::ui::init(cx);
             crate::ui::quick_look::init(cx);
             crate::ui::file_browser::init_key_bindings(cx);
             let bounds = Bounds::centered(None, size(px(1280.), px(820.)), cx);

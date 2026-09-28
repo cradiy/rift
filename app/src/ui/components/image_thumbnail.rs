@@ -13,6 +13,7 @@ const THUMBNAIL_EDGE: u32 = 256;
 pub(crate) enum ImageThumbnailLayout {
     Grid,
     List,
+    Info,
 }
 
 impl ImageThumbnailLayout {
@@ -20,6 +21,7 @@ impl ImageThumbnailLayout {
         match self {
             Self::Grid => (px(76.), px(60.)),
             Self::List => (px(32.), px(32.)),
+            Self::Info => (px(82.), px(64.)),
         }
     }
 
@@ -27,6 +29,7 @@ impl ImageThumbnailLayout {
         match self {
             Self::Grid => px(8.),
             Self::List => px(5.),
+            Self::Info => px(13.),
         }
     }
 
@@ -34,6 +37,7 @@ impl ImageThumbnailLayout {
         match self {
             Self::Grid => px(24.),
             Self::List => px(17.),
+            Self::Info => px(26.),
         }
     }
 }
