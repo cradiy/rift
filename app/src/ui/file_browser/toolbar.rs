@@ -1,6 +1,9 @@
 use std::path::{Component, Path, PathBuf};
 
-use gpui::{Div, FontWeight, IntoElement, SharedString, Stateful, div, prelude::*, px, rgba, svg};
+use gpui::{
+    Div, ExternalPaths, FontWeight, IntoElement, SharedString, Stateful, div, prelude::*, px, rgba,
+    svg,
+};
 use rift_core::{
     application::{BrowserMessage, SortSpec, ViewMode},
     ports::FileOperation,
@@ -353,6 +356,8 @@ impl FileBrowser {
             let drop_destination = destination.clone();
             let controller = self.controller.clone();
             let drop_controller = controller.clone();
+            let external_drop_destination = destination.clone();
+            let external_drop_controller = controller.clone();
             let show_root_label = current || segment_count == 1;
             let label = segment.label;
             let id = SharedString::from(format!("breadcrumb:{}", destination.display()));
@@ -420,6 +425,18 @@ impl FileBrowser {
                                 drop_destination.clone(),
                                 drop_controller.clone(),
                                 window,
+                                cx,
+                            );
+                        })
+                        .drag_over::<ExternalPaths>(|style, _, _, _| {
+                            style.bg(rgba(0x36aee838)).border_color(rgba(0x68cff671))
+                        })
+                        .on_drop(move |paths: &ExternalPaths, _, cx| {
+                            cx.stop_propagation();
+                            super::drop_external_files_into(
+                                paths,
+                                external_drop_destination.clone(),
+                                external_drop_controller.clone(),
                                 cx,
                             );
                         })

@@ -1,8 +1,8 @@
-use std::{cell::Cell, path::PathBuf, rc::Rc};
+use std::{cell::Cell, path::PathBuf, rc::Rc, sync::Arc};
 
 use gpui::{
-    App, Entity, FontWeight, IntoElement, Render, SharedString, Window, div, prelude::*, px, rgba,
-    svg,
+    App, DragAction, DragEnd, DragFailure, Entity, ExternalPaths, FontWeight, IntoElement, Render,
+    SharedString, Window, div, prelude::*, px, rgba, svg,
 };
 use rift_core::{
     application::BrowserMessage,
@@ -60,6 +60,10 @@ impl FileDrag {
 
     pub(crate) fn update_copy_modifier(&self, control: bool) {
         self.copy_requested.set(control);
+    }
+
+    pub(crate) fn external_paths(&self) -> Arc<[PathBuf]> {
+        self.paths.clone().into()
     }
 
     pub(crate) fn prepare_source_selection(&self, cx: &mut App) {
@@ -331,6 +335,82 @@ pub(crate) fn drop_files_into(
         });
     })
     .detach();
+}
+
+pub(crate) fn drop_external_files_into(
+    paths: &ExternalPaths,
+    directory: PathBuf,
+    target_controller: Entity<BrowserController>,
+    cx: &mut App,
+) {
+    let sources = paths.paths().to_vec();
+    let count = sources.len();
+    let operation = FileOperation::CopyInto { sources, directory };
+    let task = target_controller.update(cx, |controller, cx| controller.perform(operation, cx));
+
+    cx.spawn(async move |cx| {
+        let result = task.await;
+        cx.update(|cx| match result {
+            Ok(FileOperationResult { affected_paths }) => {
+                target_controller.update(cx, |controller, cx| {
+                    let message = affected_paths
+                        .into_iter()
+                        .next()
+                        .map_or(BrowserMessage::Refresh, BrowserMessage::RefreshSelecting);
+                    controller.dispatch(message, cx);
+                });
+                toast::success(item_count_message("Copied", count), cx);
+            }
+            Err(FileSystemError { message, .. }) => toast::error(message, cx),
+        });
+    })
+    .detach();
+}
+
+pub(crate) fn finish_file_drag(outcome: DragEnd, drag: &FileDrag, cx: &mut App) {
+    match outcome {
+        DragEnd::ExternalDropped {
+            action: DragAction::Move,
+        } => {
+            let ordered_paths = present_browser(drag.source_controller.read(cx).state())
+                .into_iter()
+                .map(|item| item.path)
+                .collect::<Vec<_>>();
+            let selection_after_move = successor_after_removal(&ordered_paths, &drag.paths);
+            let moved_paths = drag.paths.clone();
+            drag.source_controller.update(cx, |controller, cx| {
+                controller.forget_clipboard_paths(&moved_paths);
+                let message = selection_after_move
+                    .map_or(BrowserMessage::Refresh, BrowserMessage::RefreshSelecting);
+                controller.dispatch(message, cx);
+            });
+            toast::success(item_count_message("Moved", drag.paths.len()), cx);
+        }
+        DragEnd::ExternalDropped {
+            action: DragAction::Copy,
+        } => toast::success(item_count_message("Copied", drag.paths.len()), cx),
+        DragEnd::ExternalDropped {
+            action: DragAction::Link,
+        } => toast::success(item_count_message("Linked", drag.paths.len()), cx),
+        DragEnd::Failed(failure) => toast::error(drag_failure_message(failure), cx),
+        DragEnd::Dropped { .. } | DragEnd::Unaccepted | DragEnd::Cancelled => {}
+    }
+}
+
+fn drag_failure_message(failure: DragFailure) -> &'static str {
+    match failure {
+        DragFailure::TimedOut => "File drag timed out",
+        DragFailure::Transfer => "Unable to transfer the file list",
+        DragFailure::Protocol => "The system file drag failed",
+    }
+}
+
+fn item_count_message(action: &str, count: usize) -> String {
+    if count == 1 {
+        format!("{action} 1 item")
+    } else {
+        format!("{action} {count} items")
+    }
 }
 
 pub(crate) fn trash_dragged_files(drag: &FileDrag, cx: &mut App) {

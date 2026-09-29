@@ -9,7 +9,10 @@ mod toolbar;
 mod which_key;
 
 pub(crate) use actions::init as init_key_bindings;
-pub(crate) use drag_drop::{FileDrag, drop_files_into, file_drag_preview, trash_dragged_files};
+pub(crate) use drag_drop::{
+    FileDrag, drop_external_files_into, drop_files_into, file_drag_preview, finish_file_drag,
+    trash_dragged_files,
+};
 
 use std::{
     collections::{BTreeSet, HashMap},
@@ -18,9 +21,9 @@ use std::{
 };
 
 use gpui::{
-    Animation, AnimationExt as _, App, Bounds, Entity, FocusHandle, Focusable, IntoElement,
-    ListAlignment, ListState, MouseButton, MouseDownEvent, Pixels, Point, Render, Window, div,
-    point, prelude::*, px, rgb, rgba, svg,
+    Animation, AnimationExt as _, App, Bounds, Entity, ExternalPaths, FocusHandle, Focusable,
+    IntoElement, ListAlignment, ListState, MouseButton, MouseDownEvent, Pixels, Point, Render,
+    Window, div, point, prelude::*, px, rgb, rgba, svg,
 };
 use rift_core::application::{BrowserMessage, LoadState, SortField, ViewMode};
 use uic::{
@@ -328,10 +331,12 @@ impl FileBrowser {
         }
     }
 
-    pub(super) fn finish_marquee_selection(&mut self, cx: &mut gpui::Context<Self>) {
-        if self.marquee_selection.take().is_some() {
+    pub(super) fn finish_marquee_selection(&mut self, cx: &mut gpui::Context<Self>) -> bool {
+        let had_marquee = self.marquee_selection.take().is_some();
+        if had_marquee {
             cx.notify();
         }
+        had_marquee
     }
 
     pub(super) fn marquee_bounds(&self) -> Option<Bounds<Pixels>> {
@@ -462,6 +467,8 @@ impl FileBrowser {
         let marquee_bounds = self.marquee_bounds();
         let content_drop_directory = current_directory.clone();
         let content_drop_controller = self.controller.clone();
+        let external_drop_directory = current_directory.clone();
+        let external_drop_controller = self.controller.clone();
         let group_by_kind = sort.field == SortField::Kind;
         let content_width = if self.sidebar_visible {
             (window.bounds().size.width - px(SIDEBAR_WIDTH)).max(px(1.))
@@ -515,6 +522,16 @@ impl FileBrowser {
                                     content_drop_directory.clone(),
                                     content_drop_controller.clone(),
                                     window,
+                                    cx,
+                                );
+                            })
+                            .drag_over::<ExternalPaths>(|style, _, _, _| style.bg(rgba(0x2caee808)))
+                            .on_drop(move |paths: &ExternalPaths, _, cx| {
+                                cx.stop_propagation();
+                                drop_external_files_into(
+                                    paths,
+                                    external_drop_directory.clone(),
+                                    external_drop_controller.clone(),
                                     cx,
                                 );
                             })

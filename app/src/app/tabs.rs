@@ -9,8 +9,8 @@ use std::{
 
 use gpui::{
     Animation, AnimationExt as _, App, AppContext, Bounds, CursorStyle, DragEnd, DragMoveEvent,
-    DragSourceWindowPolicy, Entity, Focusable, FontWeight, InteractiveElement, IntoElement,
-    KeyBinding, MouseButton, ParentElement, Render, ScrollHandle, SharedString,
+    DragSourceWindowPolicy, Entity, ExternalPaths, Focusable, FontWeight, InteractiveElement,
+    IntoElement, KeyBinding, MouseButton, ParentElement, Render, ScrollHandle, SharedString,
     StatefulInteractiveElement, Styled, SystemDragOptions, WeakEntity, Window, WindowId, actions,
     div, point, prelude::FluentBuilder, px, rgba, size, svg,
 };
@@ -23,7 +23,7 @@ use crate::{
     presentation::{BrowserController, NavigationController, SharedFileClipboard},
     ui::file_browser::{
         FileBrowser, FileDrag, SIDEBAR_ANIMATION_DURATION, SIDEBAR_WIDTH, TAB_BAR_HEIGHT,
-        TOOLBAR_HEIGHT, drop_files_into, sidebar_animation_easing,
+        TOOLBAR_HEIGHT, drop_external_files_into, drop_files_into, sidebar_animation_easing,
     },
 };
 
@@ -700,6 +700,7 @@ impl RiftApp {
                     .as_ref()
                     .is_some_and(|drag| drag.tab_id == id);
                 let drop_browser = tab.browser.clone();
+                let external_drop_browser = tab.browser.clone();
                 let left = self
                     .tab_strip
                     .slots
@@ -769,6 +770,17 @@ impl RiftApp {
                             (browser.current_directory(cx), browser.controller_entity())
                         };
                         drop_files_into(drag, directory, controller, window, cx);
+                    })
+                    .drag_over::<ExternalPaths>(|style, _, _, _| {
+                        style.bg(rgba(0x36aee82e)).border_color(rgba(0x68cff68f))
+                    })
+                    .on_drop(move |paths: &ExternalPaths, _, cx| {
+                        cx.stop_propagation();
+                        let (directory, controller) = {
+                            let browser = external_drop_browser.read(cx);
+                            (browser.current_directory(cx), browser.controller_entity())
+                        };
+                        drop_external_files_into(paths, directory, controller, cx);
                     })
                     .on_mouse_down(
                         MouseButton::Middle,
@@ -1108,7 +1120,7 @@ fn finish_tab_drag(event: DragEnd, payload: TabDrag, cx: &mut App) {
                 restore_local_order(&payload, cx);
             }
         }
-        DragEnd::Cancelled => {
+        DragEnd::Cancelled | DragEnd::Failed(_) | DragEnd::ExternalDropped { .. } => {
             if payload.transaction.borrow().native {
                 open_detached_tab(&payload, cx);
             } else {

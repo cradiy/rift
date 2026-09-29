@@ -3,9 +3,9 @@ mod tabs;
 use std::{process::ExitCode, sync::Arc};
 
 use gpui::{
-    App, AppContext, Bounds, DragMoveEvent, Entity, Global, InteractiveElement, ParentElement,
-    Pixels, Render, SharedString, Styled, SystemDragOptions, Window, WindowBounds, WindowHandle,
-    WindowId, WindowOptions, div, prelude::FluentBuilder, px, size,
+    App, AppContext, Bounds, DragAction, DragMoveEvent, Entity, Global, InteractiveElement,
+    ParentElement, Pixels, Render, SharedString, Styled, SystemFileDragOptions, Window,
+    WindowBounds, WindowHandle, WindowId, WindowOptions, div, prelude::FluentBuilder, px, size,
 };
 use gpui_platform::application;
 use rift_core::ports::{FileSystem, NavigationSource};
@@ -189,7 +189,15 @@ impl RiftApp {
         ) {
             return;
         }
-        match window.promote_active_drag_to_system_with_options(SystemDragOptions::default(), cx) {
+        let options = SystemFileDragOptions {
+            preferred_action: if event.event.modifiers.control {
+                DragAction::Copy
+            } else {
+                DragAction::Move
+            },
+            ..SystemFileDragOptions::default()
+        };
+        match window.promote_active_file_drag_to_system(drag.external_paths(), options, cx) {
             Ok(_) => drag.mark_native(),
             Err(error) => log::warn!("unable to promote file drag to the system: {error:#}"),
         }

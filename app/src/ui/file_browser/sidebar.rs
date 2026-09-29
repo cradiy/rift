@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use gpui::{
-    Animation, AnimationExt as _, FontWeight, IntoElement, SharedString, div, prelude::*, px, rgba,
-    svg,
+    Animation, AnimationExt as _, ExternalPaths, FontWeight, IntoElement, SharedString, div,
+    prelude::*, px, rgba, svg,
 };
 use gpui_effects::FrostedGlass;
 use rift_core::{
@@ -14,8 +14,8 @@ use uic::assets::LucideIcons;
 use crate::{presentation::BrowserController, ui::theme};
 
 use super::{
-    FileBrowser, FileDrag, SIDEBAR_ANIMATION_DURATION, SIDEBAR_WIDTH, drop_files_into,
-    sidebar_animation_easing, trash_dragged_files,
+    FileBrowser, FileDrag, SIDEBAR_ANIMATION_DURATION, SIDEBAR_WIDTH, drop_external_files_into,
+    drop_files_into, sidebar_animation_easing, trash_dragged_files,
 };
 
 impl FileBrowser {
@@ -99,6 +99,8 @@ impl FileBrowser {
         let trash_target = location.kind() == LocationKind::Trash;
         let drop_path = path.clone();
         let drop_controller = controller.clone();
+        let external_drop_path = path.clone();
+        let external_drop_controller = controller.clone();
         let selected = selected_path == Some(path.as_path());
         let id = SharedString::from(format!("location:{}", path.display()));
         div()
@@ -132,6 +134,21 @@ impl FileBrowser {
                 .on_drop(move |drag: &FileDrag, window, cx| {
                     cx.stop_propagation();
                     drop_files_into(drag, drop_path.clone(), drop_controller.clone(), window, cx);
+                })
+                .drag_over::<ExternalPaths>(|style, _, _, _| {
+                    style
+                        .bg(rgba(0x36aee838))
+                        .border_1()
+                        .border_color(rgba(0x68cff671))
+                })
+                .on_drop(move |paths: &ExternalPaths, _, cx| {
+                    cx.stop_propagation();
+                    drop_external_files_into(
+                        paths,
+                        external_drop_path.clone(),
+                        external_drop_controller.clone(),
+                        cx,
+                    );
                 })
             })
             .when(trash_target, |row| {

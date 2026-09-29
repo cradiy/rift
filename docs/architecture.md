@@ -189,9 +189,12 @@ the content surface and browser tabs resolve that payload to a destination.
 Drops move by default, copy while Control is held, and reject self/descendant
 targets before starting filesystem work. The drag remains inside GPUI while it
 is within a window for smooth pointer tracking; only reaching a window edge
-promotes it to the Linux system drag protocol so another Rift window can
-receive it. This protocol currently remains process-local and does not export
-files to unrelated applications.
+promotes it to the Linux system file-drag protocol. Other Rift windows keep the
+typed payload, while unrelated applications receive a standard `text/uri-list`
+and negotiate Copy or Move. The external completion result refreshes Rift after
+a confirmed Move without deleting source files itself. Files dragged into Rift
+arrive as `ExternalPaths` and are copied through the same asynchronous command
+path used by Paste.
 
 ### Sidebar discovery
 

@@ -1,6 +1,6 @@
 use gpui::{
-    AnyElement, Bounds, Entity, FontWeight, IntoElement, ListState, MouseButton, Pixels, Point,
-    SharedString, div, list, point, prelude::*, px, rgba, svg,
+    AnyElement, Bounds, Entity, ExternalPaths, FontWeight, IntoElement, ListState, MouseButton,
+    Pixels, Point, SharedString, div, list, point, prelude::*, px, rgba, svg,
 };
 use rift_core::application::{BrowserMessage, SelectionMode, SortField, ViewMode};
 use rift_core::domain::EntryCategory;
@@ -16,7 +16,8 @@ use crate::{
 };
 
 use super::{
-    FileBrowser, FileDrag, FolderCountState, drop_files_into, file_drag_preview,
+    FileBrowser, FileDrag, FolderCountState, drop_external_files_into, drop_files_into,
+    file_drag_preview, finish_file_drag,
     inline_rename::{InlineRenameLayout, InlineRenameView},
 };
 
@@ -417,6 +418,8 @@ impl FileBrowser {
         let drag = FileDrag::for_entry(entry.clone(), controller.clone(), cx);
         let drop_path = path.clone();
         let drop_controller = controller.clone();
+        let external_drop_path = path.clone();
+        let external_drop_controller = controller.clone();
         let context_path = path.clone();
         let context_entry = entry.clone();
         let context_controller = controller.clone();
@@ -470,6 +473,18 @@ impl FileBrowser {
                 .on_drop(move |drag: &FileDrag, window, cx| {
                     cx.stop_propagation();
                     drop_files_into(drag, drop_path.clone(), drop_controller.clone(), window, cx);
+                })
+                .drag_over::<ExternalPaths>(|style, _, _, _| {
+                    style.bg(rgba(0x36aee82e)).border_color(rgba(0x68cff68f))
+                })
+                .on_drop(move |paths: &ExternalPaths, _, cx| {
+                    cx.stop_propagation();
+                    drop_external_files_into(
+                        paths,
+                        external_drop_path.clone(),
+                        external_drop_controller.clone(),
+                        cx,
+                    );
                 })
             })
             .on_mouse_down(gpui::MouseButton::Left, move |_, window, cx| {
@@ -527,6 +542,9 @@ impl FileBrowser {
             .on_drag(drag, |drag, _, _, cx| {
                 drag.prepare_source_selection(cx);
                 file_drag_preview(drag, cx)
+            })
+            .on_drag_end::<FileDrag>(|outcome, drag, _, cx| {
+                finish_file_drag(*outcome, drag, cx);
             })
             .child(if entry.is_directory {
                 FolderIcon::new()
@@ -668,10 +686,11 @@ impl FileBrowser {
                 }
             })
             .on_mouse_up(MouseButton::Left, move |_, _, cx| {
-                up_browser.update(cx, |browser, cx| {
-                    browser.finish_marquee_selection(cx);
-                });
-                cx.stop_propagation();
+                let had_marquee =
+                    up_browser.update(cx, |browser, cx| browser.finish_marquee_selection(cx));
+                if had_marquee {
+                    cx.stop_propagation();
+                }
             })
             .on_mouse_up_out(MouseButton::Left, move |_, _, cx| {
                 up_out_browser.update(cx, |browser, cx| {
@@ -743,6 +762,8 @@ impl FileBrowser {
         let drag = FileDrag::for_entry(entry.clone(), controller.clone(), _cx);
         let drop_path = path.clone();
         let drop_controller = controller.clone();
+        let external_drop_path = path.clone();
+        let external_drop_controller = controller.clone();
         let context_controller = controller.clone();
         let context_browser = browser.clone();
         let click_browser = browser.clone();
@@ -768,6 +789,18 @@ impl FileBrowser {
                 .on_drop(move |drag: &FileDrag, window, cx| {
                     cx.stop_propagation();
                     drop_files_into(drag, drop_path.clone(), drop_controller.clone(), window, cx);
+                })
+                .drag_over::<ExternalPaths>(|style, _, _, _| {
+                    style.bg(rgba(0x36aee842)).border_color(rgba(0x68cff68f))
+                })
+                .on_drop(move |paths: &ExternalPaths, _, cx| {
+                    cx.stop_propagation();
+                    drop_external_files_into(
+                        paths,
+                        external_drop_path.clone(),
+                        external_drop_controller.clone(),
+                        cx,
+                    );
                 })
             })
             .cursor_pointer()
@@ -826,6 +859,9 @@ impl FileBrowser {
             .on_drag(drag, |drag, _, _, cx| {
                 drag.prepare_source_selection(cx);
                 file_drag_preview(drag, cx)
+            })
+            .on_drag_end::<FileDrag>(|outcome, drag, _, cx| {
+                finish_file_drag(*outcome, drag, cx);
             })
             .child(
                 div()
@@ -972,10 +1008,11 @@ impl FileBrowser {
                         }
                     })
                     .on_mouse_up(MouseButton::Left, move |_, _, cx| {
-                        up_browser.update(cx, |browser, cx| {
-                            browser.finish_marquee_selection(cx);
-                        });
-                        cx.stop_propagation();
+                        let had_marquee = up_browser
+                            .update(cx, |browser, cx| browser.finish_marquee_selection(cx));
+                        if had_marquee {
+                            cx.stop_propagation();
+                        }
                     })
                     .on_mouse_up_out(MouseButton::Left, move |_, _, cx| {
                         up_out_browser.update(cx, |browser, cx| {
