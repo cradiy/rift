@@ -52,9 +52,11 @@ pub(super) struct FileItemContext {
 }
 
 impl FileBrowser {
-    const GRID_TILE_WIDTH: f32 = 122.;
-    const GRID_COLUMN_GAP: f32 = 15.;
-    const GRID_HORIZONTAL_PADDING: f32 = 44.;
+    pub(super) const GRID_ROW_HEIGHT: f32 = 180.;
+    const GRID_TILE_WIDTH: f32 = 176.;
+    const GRID_COLUMN_GAP: f32 = 24.;
+    const GRID_SIDE_PADDING: f32 = 24.;
+    const GRID_HORIZONTAL_PADDING: f32 = Self::GRID_SIDE_PADDING * 2.;
 
     fn clipped_marquee_bounds(
         &self,
@@ -91,7 +93,7 @@ impl FileBrowser {
                                 .enumerate()
                                 .filter_map(move |(column, entry)| {
                                     let left = row_bounds.left()
-                                        + px(22.)
+                                        + px(Self::GRID_SIDE_PADDING)
                                         + px(column as f32
                                             * (Self::GRID_TILE_WIDTH + Self::GRID_COLUMN_GAP));
                                     let item_bounds = Bounds::from_corners(
@@ -207,6 +209,16 @@ impl FileBrowser {
         }
     }
 
+    pub(super) fn scroll_to_reveal_if_needed(scroll_state: &ListState, index: usize) {
+        let fully_visible = scroll_state.bounds_for_item(index).is_some_and(|item| {
+            let viewport = scroll_state.viewport_bounds();
+            item.top() >= viewport.top() && item.bottom() <= viewport.bottom()
+        });
+        if !fully_visible {
+            scroll_state.scroll_to_reveal_item(index);
+        }
+    }
+
     fn grid_rows(items: Vec<BrowserItem>, group_by_kind: bool, columns: usize) -> Vec<GridRow> {
         let mut rows = Vec::new();
         if group_by_kind {
@@ -232,7 +244,7 @@ impl FileBrowser {
         match view_mode {
             ViewMode::List => {
                 if let Some(index) = items.iter().position(|item| item.path == path) {
-                    self.list_scroll.scroll_to_reveal_item(index);
+                    Self::scroll_to_reveal_if_needed(&self.list_scroll, index);
                 }
             }
             ViewMode::Grid => {
@@ -240,7 +252,7 @@ impl FileBrowser {
                 if let Some(index) = rows.iter().position(|row| {
                     matches!(row, GridRow::Items { entries, .. } if entries.iter().any(|item| item.path == path))
                 }) {
-                    self.grid_scroll.scroll_to_reveal_item(index);
+                    Self::scroll_to_reveal_if_needed(&self.grid_scroll, index);
                 }
             }
         }
@@ -377,15 +389,15 @@ impl FileBrowser {
         let accent = category.map(Self::category_accent);
         div()
             .relative()
-            .w(px(76.))
-            .h(px(60.))
+            .w(px(96.))
+            .h(px(76.))
             .flex()
             .items_center()
             .justify_center()
             .child(
                 svg()
                     .path(LucideIcons::File)
-                    .size(px(48.))
+                    .size(px(60.))
                     .text_color(accent.unwrap_or_else(|| rgba(0xd8d8decc))),
             )
     }
@@ -450,12 +462,12 @@ impl FileBrowser {
         };
         div()
             .id(SharedString::from(format!("grid:{}", path.display())))
-            .w(px(122.))
-            .p(px(7.))
+            .w(px(Self::GRID_TILE_WIDTH))
+            .p(px(9.))
             .flex()
             .flex_col()
             .items_center()
-            .gap(px(6.))
+            .gap(px(7.))
             .rounded_xl()
             .border_1()
             .border_color(rgba(0x00000000))
@@ -548,7 +560,7 @@ impl FileBrowser {
             })
             .child(if entry.is_directory {
                 FolderIcon::new()
-                    .size(px(76.))
+                    .size(px(96.))
                     .glyph(icon)
                     .into_any_element()
             } else if entry.category == EntryCategory::Image {
@@ -568,11 +580,12 @@ impl FileBrowser {
                 div()
                     .w_full()
                     .flex_none()
-                    .px(px(3.))
+                    .px(px(4.))
                     .overflow_hidden()
+                    .whitespace_normal()
                     .text_center()
                     .text_size(px(13.))
-                    .line_clamp(2)
+                    .line_clamp(3)
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(rgba(0xf2f1f5e8))
                     .child(entry.name)
@@ -604,7 +617,7 @@ impl FileBrowser {
         let browser = item_context.browser;
         let rows = Self::grid_rows(items, group_by_kind, columns);
         if scroll_state.item_count() != rows.len() {
-            scroll_state.reset_with_uniform_height(rows.len(), px(142.));
+            scroll_state.reset_with_uniform_height(rows.len(), px(Self::GRID_ROW_HEIGHT));
         }
         let rows = std::sync::Arc::new(rows);
         let rendered_rows = rows.clone();
@@ -617,7 +630,7 @@ impl FileBrowser {
                     .h(px(38.))
                     .w_full()
                     .flex_none()
-                    .px(px(22.))
+                    .px(px(Self::GRID_SIDE_PADDING))
                     .pt(px(8.))
                     .pb(px(2.))
                     .child(Self::category_header(category, count))
@@ -626,10 +639,10 @@ impl FileBrowser {
                     entries,
                     show_category,
                 } => div()
-                    .h(px(if show_category { 128. } else { 142. }))
+                    .h(px(Self::GRID_ROW_HEIGHT))
                     .w_full()
                     .flex_none()
-                    .px(px(22.))
+                    .px(px(Self::GRID_SIDE_PADDING))
                     .flex()
                     .content_start()
                     .items_start()

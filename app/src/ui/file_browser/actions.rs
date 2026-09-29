@@ -300,9 +300,10 @@ impl FileBrowser {
             }
             (Some(current), direction, ViewMode::Grid) => {
                 let rows = Self::grid_navigation_rows(&items, group_by_kind, self.grid_columns);
-                let page_rows =
-                    ((self.grid_scroll.viewport_bounds().size.height / px(142.)).floor() as usize)
-                        .max(1);
+                let page_rows = ((self.grid_scroll.viewport_bounds().size.height
+                    / px(Self::GRID_ROW_HEIGHT))
+                .floor() as usize)
+                    .max(1);
                 Self::grid_target(&rows, current, direction, page_rows)
             }
         };
@@ -356,11 +357,11 @@ impl FileBrowser {
         }
 
         match view_mode {
-            ViewMode::List => self.list_scroll.scroll_to_reveal_item(target),
+            ViewMode::List => Self::scroll_to_reveal_if_needed(&self.list_scroll, target),
             ViewMode::Grid => {
                 let rows = Self::grid_navigation_rows(&items, group_by_kind, self.grid_columns);
                 if let Some(row) = rows.iter().find(|row| row.item_indices.contains(&target)) {
-                    self.grid_scroll.scroll_to_reveal_item(row.list_index);
+                    Self::scroll_to_reveal_if_needed(&self.grid_scroll, row.list_index);
                 }
             }
         }

@@ -37,7 +37,9 @@ use uic::{
 
 use crate::{
     config::AppConfig,
-    presentation::{BrowserController, BrowserItem, NavigationController, present_browser},
+    presentation::{
+        BrowserController, BrowserItem, NavigationController, format_size, present_browser,
+    },
 };
 
 use self::files::FileItemContext;
@@ -261,6 +263,23 @@ impl FileBrowser {
         .detach();
     }
 
+    fn request_selected_folder_counts(
+        &mut self,
+        items: &[BrowserItem],
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let missing = items
+            .iter()
+            .filter(|item| item.selected && item.is_directory)
+            .map(|item| self.folder_count_key(item.path.clone(), item.modified_at))
+            .filter(|key| !self.folder_counts.contains_key(key))
+            .collect::<Vec<_>>();
+
+        for key in missing {
+            self.request_folder_count(key, cx);
+        }
+    }
+
     pub(super) fn begin_marquee_selection(
         &mut self,
         event: &MouseDownEvent,
@@ -397,7 +416,6 @@ impl FileBrowser {
             )
         };
         let search_query = self.search_input.read(cx).value().trim().to_owned();
-        let selection_status = selection_status(&all_items);
         if self.vim_trash_confirmation.as_ref().is_some_and(|paths| {
             let selected = self.controller.read(cx).selected_paths();
             selected.len() != paths.len() || selected.iter().any(|path| !paths.contains(path))
@@ -406,12 +424,13 @@ impl FileBrowser {
         }
         let all_item_count = all_items.len();
         let items = if search_query.is_empty() {
-            all_items
+            all_items.clone()
         } else {
             let normalized_query = search_query.to_lowercase();
             all_items
-                .into_iter()
+                .iter()
                 .filter(|item| item.name.to_lowercase().contains(&normalized_query))
+                .cloned()
                 .collect()
         };
         if self.rendered_active_selection != active_selection {
@@ -440,6 +459,14 @@ impl FileBrowser {
             self.rendered_directory_request = request_id.or(self.rendered_directory_request);
             self.invalidate_folder_counts();
         }
+        self.request_selected_folder_counts(&all_items, cx);
+        let selection_status = selection_status(&all_items, |item| {
+            let key = self.folder_count_key(item.path.clone(), item.modified_at);
+            match self.folder_count(&key) {
+                Some(FolderCountState::Ready(count)) => Some(count),
+                _ => None,
+            }
+        });
         if directory_changed {
             self.rendered_directory = current_directory.clone();
             self.vim_trash_confirmation = None;
@@ -725,6 +752,7 @@ impl FileBrowser {
                 .into_any_element();
         }
 
+        let showing_selection = matches!(load_state, LoadState::Idle) && selection_status.is_some();
         let status = match load_state {
             LoadState::Loading { .. } => "Loading".to_owned(),
             LoadState::Failed { .. } => "Unavailable".to_owned(),
@@ -735,7 +763,7 @@ impl FileBrowser {
             },
         };
         div()
-            .h(px(27.))
+            .h(px(34.))
             .px(px(12.))
             .flex()
             .items_center()
@@ -744,25 +772,97 @@ impl FileBrowser {
             .border_color(rgba(0xffffff10))
             .text_xs()
             .text_color(rgba(0xc3c1c99c))
-            .child(div().max_w(px(480.)).truncate().child(status))
+            .child(
+                div()
+                    .min_w_0()
+                    .whitespace_nowrap()
+                    .when(showing_selection, |label| {
+                        label
+                            .px(px(11.))
+                            .py(px(4.))
+                            .rounded_full()
+                            .bg(rgba(0x0e1018a8))
+                            .text_size(px(12.5))
+                            .text_color(rgba(0xf1f0f4e8))
+                    })
+                    .child(status),
+            )
             .into_any_element()
     }
 }
 
-fn selection_status(items: &[BrowserItem]) -> Option<String> {
-    let mut selected = items.iter().filter(|item| item.selected);
-    let first = selected.next()?;
-    let second = selected.next();
+fn selection_status(
+    items: &[BrowserItem],
+    mut folder_item_count: impl FnMut(&BrowserItem) -> Option<usize>,
+) -> Option<String> {
+    let selected = items
+        .iter()
+        .filter(|item| item.selected)
+        .collect::<Vec<_>>();
+    let first = *selected.first()?;
 
-    if second.is_none() {
-        return Some(if first.is_directory {
-            "1 folder selected".to_owned()
+    if selected.len() == 1 {
+        let detail = if first.is_directory {
+            folder_item_count(first).map(|count| {
+                let noun = if count == 1 { "item" } else { "items" };
+                format!("{count} {noun}")
+            })
         } else {
-            format!("1 file selected · {}", first.size)
+            Some(first.size.clone())
+        };
+        return Some(match detail {
+            Some(detail) => format!("\"{}\" selected ({detail})", first.name),
+            None => format!("\"{}\" selected", first.name),
         });
     }
 
-    Some(format!("{} items selected", 2 + selected.count()))
+    let folders = selected
+        .iter()
+        .copied()
+        .filter(|item| item.is_directory)
+        .collect::<Vec<_>>();
+    let other_items = selected
+        .iter()
+        .copied()
+        .filter(|item| !item.is_directory)
+        .collect::<Vec<_>>();
+    let mut parts = Vec::with_capacity(2);
+
+    if !folders.is_empty() {
+        let count = folders.len();
+        let noun = if count == 1 { "folder" } else { "folders" };
+        let contained_count = folders.iter().try_fold(0usize, |total, item| {
+            folder_item_count(item).map(|count| total.saturating_add(count))
+        });
+        let detail = contained_count.map_or_else(String::new, |contained_count| {
+            let contained_noun = if contained_count == 1 {
+                "item"
+            } else {
+                "items"
+            };
+            format!(" (containing a total of {contained_count} {contained_noun})")
+        });
+        parts.push(format!("{count} {noun} selected{detail}"));
+    }
+
+    if !other_items.is_empty() {
+        let count = other_items.len();
+        let noun = match (folders.is_empty(), count) {
+            (true, 1) => "item",
+            (true, _) => "items",
+            (false, 1) => "other item",
+            (false, _) => "other items",
+        };
+        let byte_len = other_items
+            .iter()
+            .fold(0u64, |total, item| total.saturating_add(item.byte_len));
+        parts.push(format!(
+            "{count} {noun} selected ({})",
+            format_size(byte_len)
+        ));
+    }
+
+    Some(parts.join(", "))
 }
 
 fn vim_trash_confirmation_status(item_count: usize) -> String {
@@ -903,14 +1003,20 @@ mod tests {
     use super::{BrowserItem, selection_status, vim_trash_confirmation_status};
     use crate::presentation::ItemIcon;
 
-    fn item(name: &str, is_directory: bool, size: &str, selected: bool) -> BrowserItem {
+    fn item(
+        name: &str,
+        is_directory: bool,
+        size: &str,
+        byte_len: u64,
+        selected: bool,
+    ) -> BrowserItem {
         BrowserItem {
             path: PathBuf::from(name),
             name: name.to_owned(),
             detail: if is_directory { "Folder" } else { size }.to_owned(),
             modified: "—".to_owned(),
             size: size.to_owned(),
-            byte_len: 0,
+            byte_len,
             modified_at: None,
             kind: if is_directory { "Folder" } else { "Document" }.to_owned(),
             category: if is_directory {
@@ -931,20 +1037,45 @@ mod tests {
 
     #[test]
     fn status_summarizes_the_current_selection() {
-        let folder = item("Photos", true, "—", true);
-        let file = item("notes.md", false, "1.5 KB", true);
+        let folder = item("Photos", true, "—", 0, true);
+        let file = item("notes.md", false, "1.5 KB", 1536, true);
 
         assert_eq!(
-            selection_status(std::slice::from_ref(&folder)).as_deref(),
-            Some("1 folder selected")
+            selection_status(std::slice::from_ref(&folder), |_| Some(9)).as_deref(),
+            Some("\"Photos\" selected (9 items)")
         );
         assert_eq!(
-            selection_status(std::slice::from_ref(&file)).as_deref(),
-            Some("1 file selected · 1.5 KB")
+            selection_status(std::slice::from_ref(&file), |_| None).as_deref(),
+            Some("\"notes.md\" selected (1.5 KB)")
         );
         assert_eq!(
-            selection_status(&[folder, file]).as_deref(),
-            Some("2 items selected")
+            selection_status(&[folder, file], |_| Some(9)).as_deref(),
+            Some(
+                "1 folder selected (containing a total of 9 items), 1 other item selected (1.5 KB)"
+            )
+        );
+    }
+
+    #[test]
+    fn status_keeps_folder_and_other_item_totals_separate() {
+        let items = [
+            item("Photos", true, "—", 0, true),
+            item("Projects", true, "—", 0, true),
+            item("one.apk", false, "53.8 MB", 56_400_000, true),
+            item("two.apk", false, "53.8 MB", 56_400_000, true),
+            item("three.apk", false, "53.8 MB", 56_400_000, true),
+        ];
+
+        assert_eq!(
+            selection_status(&items, |item| match item.name.as_str() {
+                "Photos" => Some(4),
+                "Projects" => Some(5),
+                _ => None,
+            })
+            .as_deref(),
+            Some(
+                "2 folders selected (containing a total of 9 items), 3 other items selected (161.4 MB)"
+            )
         );
     }
 

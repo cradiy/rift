@@ -19,7 +19,7 @@ pub(crate) enum ImageThumbnailLayout {
 impl ImageThumbnailLayout {
     fn size(self) -> (Pixels, Pixels) {
         match self {
-            Self::Grid => (px(76.), px(60.)),
+            Self::Grid => (px(96.), px(76.)),
             Self::List => (px(32.), px(32.)),
             Self::Info => (px(82.), px(64.)),
         }
@@ -27,7 +27,7 @@ impl ImageThumbnailLayout {
 
     fn corner_radius(self) -> Pixels {
         match self {
-            Self::Grid => px(8.),
+            Self::Grid => px(10.),
             Self::List => px(5.),
             Self::Info => px(13.),
         }
@@ -35,7 +35,7 @@ impl ImageThumbnailLayout {
 
     fn placeholder_icon_size(self) -> Pixels {
         match self {
-            Self::Grid => px(24.),
+            Self::Grid => px(30.),
             Self::List => px(17.),
             Self::Info => px(26.),
         }
