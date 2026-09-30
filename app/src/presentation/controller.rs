@@ -1,12 +1,13 @@
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use gpui::{AppContext, Context, Task};
 use rift_core::{
-    application::{BrowserEffect, BrowserMessage, BrowserState},
-    ports::{FileOperation, FileOperationResult, FileSystem, FileSystemError},
+    application::{BrowserEffect, BrowserMessage, BrowserState, LoadState},
+    ports::{DirectoryWatch, FileOperation, FileOperationResult, FileSystem, FileSystemError},
 };
 
 use crate::config::AppConfig;
@@ -15,7 +16,13 @@ pub(crate) struct BrowserController {
     state: BrowserState,
     file_system: Arc<dyn FileSystem>,
     clipboard: SharedFileClipboard,
+    directory_watch: Option<Box<dyn DirectoryWatch>>,
+    watched_directory: Option<PathBuf>,
+    directory_watch_generation: u64,
+    auto_refresh_in_flight: bool,
 }
+
+const DIRECTORY_WATCH_POLL_INTERVAL: Duration = Duration::from_millis(220);
 
 #[derive(Clone, Default)]
 pub(crate) struct SharedFileClipboard(Arc<Mutex<Vec<PathBuf>>>);
@@ -38,6 +45,10 @@ impl BrowserController {
             state,
             file_system,
             clipboard,
+            directory_watch: None,
+            watched_directory: None,
+            directory_watch_generation: 0,
+            auto_refresh_in_flight: false,
         }
     }
 
@@ -108,6 +119,17 @@ impl BrowserController {
     }
 
     pub(crate) fn dispatch(&mut self, message: BrowserMessage, cx: &mut Context<Self>) {
+        let directory_before = self.state.current_directory().to_path_buf();
+        let retries_directory_watch = matches!(&message, BrowserMessage::Refresh);
+        let starts_directory_read = matches!(
+            &message,
+            BrowserMessage::Navigate(_)
+                | BrowserMessage::GoBack
+                | BrowserMessage::GoForward
+                | BrowserMessage::GoUp
+                | BrowserMessage::Refresh
+                | BrowserMessage::RefreshSelecting(_)
+        );
         let preferences_changed = matches!(
             &message,
             BrowserMessage::SetViewMode(_)
@@ -115,6 +137,13 @@ impl BrowserController {
                 | BrowserMessage::SetShowHiddenFiles(_)
         );
         let effects = self.state.update(message);
+        let directory_changed = self.state.current_directory() != directory_before;
+        if directory_changed
+            || (starts_directory_read && self.watched_directory.is_none())
+            || (retries_directory_watch && self.directory_watch.is_none() && !self.state.is_trash())
+        {
+            self.restart_directory_watch(cx);
+        }
         if preferences_changed {
             AppConfig::update_browser_state(
                 cx,
@@ -155,6 +184,107 @@ impl BrowserController {
                     },
                 };
                 controller.dispatch(message, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn restart_directory_watch(&mut self, cx: &mut Context<Self>) {
+        self.directory_watch_generation = self.directory_watch_generation.wrapping_add(1);
+        self.auto_refresh_in_flight = false;
+        let generation = self.directory_watch_generation;
+        let path = self.state.current_directory().to_path_buf();
+        self.watched_directory = Some(path.clone());
+        self.directory_watch = if self.state.is_trash() {
+            None
+        } else {
+            match self.file_system.watch_directory(&path) {
+                Ok(watch) => Some(watch),
+                Err(error) => {
+                    log::warn!("unable to watch {}: {error}", path.display());
+                    None
+                }
+            }
+        };
+        let mut observed_revision = self
+            .directory_watch
+            .as_ref()
+            .map_or(0, |watch| watch.revision());
+        let mut pending_revision = None;
+
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(DIRECTORY_WATCH_POLL_INTERVAL)
+                    .await;
+                let Some(this) = this.upgrade() else {
+                    return;
+                };
+                let mut keep_watching = true;
+                this.update(cx, |controller, cx| {
+                    if controller.directory_watch_generation != generation {
+                        keep_watching = false;
+                        return;
+                    }
+                    let Some(revision) = controller
+                        .directory_watch
+                        .as_ref()
+                        .map(|watch| watch.revision())
+                    else {
+                        keep_watching = false;
+                        return;
+                    };
+                    if revision == observed_revision {
+                        pending_revision = None;
+                        return;
+                    }
+                    if pending_revision != Some(revision) {
+                        pending_revision = Some(revision);
+                        return;
+                    }
+                    if !matches!(controller.state.load_state(), LoadState::Idle)
+                        || controller.auto_refresh_in_flight
+                    {
+                        return;
+                    }
+                    observed_revision = revision;
+                    pending_revision = None;
+                    controller.refresh_from_directory_watch(generation, cx);
+                });
+                if !keep_watching {
+                    return;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn refresh_from_directory_watch(&mut self, generation: u64, cx: &mut Context<Self>) {
+        if self.auto_refresh_in_flight {
+            return;
+        }
+        self.auto_refresh_in_flight = true;
+        let path = self.state.current_directory().to_path_buf();
+        let file_system = self.file_system.clone();
+        let path_for_read = path.clone();
+        let read = cx.background_spawn(async move { file_system.read_directory(&path_for_read) });
+
+        cx.spawn(async move |this, cx| {
+            let result = read.await;
+            let Some(this) = this.upgrade() else {
+                return;
+            };
+            this.update(cx, |controller, cx| {
+                if controller.directory_watch_generation != generation {
+                    return;
+                }
+                controller.auto_refresh_in_flight = false;
+                match result {
+                    Ok(entries) => {
+                        controller.dispatch(BrowserMessage::DirectoryChanged { path, entries }, cx)
+                    }
+                    Err(error) => log::debug!("automatic directory refresh failed: {error}"),
+                }
             });
         })
         .detach();

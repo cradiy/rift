@@ -6,6 +6,7 @@ license = "MIT"
 
 [dependencies]
 dirs = "6"
+notify = "8.2.0"
 rift-core = { path = "../rift-core" }
 trash = "5.2.9"
 

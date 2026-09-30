@@ -97,6 +97,7 @@ pub(crate) struct FileBrowser {
     which_key: WhichKeyState,
     rendered_directory: std::path::PathBuf,
     rendered_directory_request: Option<u64>,
+    rendered_snapshot_revision: u64,
     rendered_show_hidden_files: bool,
     rendered_item_count: usize,
     rendered_active_selection: Option<PathBuf>,
@@ -191,6 +192,7 @@ impl FileBrowser {
             which_key: WhichKeyState::default(),
             rendered_directory: std::path::PathBuf::new(),
             rendered_directory_request: None,
+            rendered_snapshot_revision: 0,
             rendered_show_hidden_files: false,
             rendered_item_count: 0,
             rendered_active_selection: None,
@@ -397,6 +399,7 @@ impl FileBrowser {
             has_selection,
             show_hidden_files,
             is_trash,
+            snapshot_revision,
         ) = {
             let controller = self.controller.read(cx);
             let state = controller.state();
@@ -413,6 +416,7 @@ impl FileBrowser {
                 !state.selection().is_empty(),
                 state.show_hidden_files(),
                 state.is_trash(),
+                state.snapshot_revision(),
             )
         };
         let search_query = self.search_input.read(cx).value().trim().to_owned();
@@ -454,9 +458,11 @@ impl FileBrowser {
         };
         let directory_reloaded =
             request_id.is_some() && self.rendered_directory_request != request_id;
-        if directory_changed || hidden_policy_changed || directory_reloaded {
+        let snapshot_changed = self.rendered_snapshot_revision != snapshot_revision;
+        if directory_changed || hidden_policy_changed || directory_reloaded || snapshot_changed {
             self.rendered_show_hidden_files = show_hidden_files;
             self.rendered_directory_request = request_id.or(self.rendered_directory_request);
+            self.rendered_snapshot_revision = snapshot_revision;
             self.invalidate_folder_counts();
         }
         self.request_selected_folder_counts(&all_items, cx);

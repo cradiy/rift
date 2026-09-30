@@ -2,12 +2,20 @@ use std::{
     collections::BTreeSet,
     fs::{self, OpenOptions},
     path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{Duration, SystemTime},
 };
 
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use rift_core::{
     domain::{Entry, EntryKind, is_trash_location, trash_location_path},
-    ports::{FileOperation, FileOperationResult, FileSystem, FileSystemError, FileSystemOperation},
+    ports::{
+        DirectoryWatch, FileOperation, FileOperationResult, FileSystem, FileSystemError,
+        FileSystemOperation,
+    },
 };
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -182,6 +190,41 @@ impl FileSystem for LocalFileSystem {
             }
             FileOperation::PurgeTrash { paths } => purge_trash_items(paths),
         }
+    }
+
+    fn watch_directory(&self, path: &Path) -> Result<Box<dyn DirectoryWatch>, FileSystemError> {
+        let revision = Arc::new(AtomicU64::new(0));
+        let callback_revision = revision.clone();
+        let mut watcher =
+            notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+                if !matches!(event, Ok(event) if matches!(event.kind, EventKind::Access(_))) {
+                    callback_revision.fetch_add(1, Ordering::Relaxed);
+                }
+            })
+            .map_err(|error| {
+                FileSystemError::new(FileSystemOperation::WatchDirectory, path, error.to_string())
+            })?;
+        watcher
+            .watch(path, RecursiveMode::NonRecursive)
+            .map_err(|error| {
+                FileSystemError::new(FileSystemOperation::WatchDirectory, path, error.to_string())
+            })?;
+
+        Ok(Box::new(NotifyDirectoryWatch {
+            _watcher: watcher,
+            revision,
+        }))
+    }
+}
+
+struct NotifyDirectoryWatch {
+    _watcher: RecommendedWatcher,
+    revision: Arc<AtomicU64>,
+}
+
+impl DirectoryWatch for NotifyDirectoryWatch {
+    fn revision(&self) -> u64 {
+        self.revision.load(Ordering::Relaxed)
     }
 }
 
@@ -424,7 +467,13 @@ fn remove_entry(path: &Path) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::{ffi::OsString, fs, path::Path};
+    use std::{
+        ffi::OsString,
+        fs,
+        path::Path,
+        thread,
+        time::{Duration, Instant},
+    };
 
     use rift_core::ports::{FileOperation, FileSystem};
 
@@ -477,6 +526,23 @@ mod tests {
                 .unwrap(),
             3
         );
+    }
+
+    #[test]
+    fn watches_immediate_directory_changes() {
+        let root = tempfile::tempdir().expect("temporary directory");
+        let watch = LocalFileSystem
+            .watch_directory(root.path())
+            .expect("temporary directory should be watchable");
+        let initial_revision = watch.revision();
+
+        fs::write(root.path().join("created.txt"), "created").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while watch.revision() == initial_revision && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+        }
+
+        assert!(watch.revision() > initial_revision);
     }
 
     #[test]

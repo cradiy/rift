@@ -16,6 +16,23 @@ pub trait FileSystem: Send + Sync + 'static {
     ) -> Result<usize, FileSystemError>;
 
     fn perform(&self, operation: FileOperation) -> Result<FileOperationResult, FileSystemError>;
+
+    fn watch_directory(&self, path: &Path) -> Result<Box<dyn DirectoryWatch>, FileSystemError> {
+        Err(FileSystemError::new(
+            FileSystemOperation::WatchDirectory,
+            path,
+            "directory watching is not supported",
+        ))
+    }
+}
+
+/// A lightweight change signal owned by the filesystem adapter.
+///
+/// Implementations update the monotonically increasing revision from their
+/// platform callback. Consumers can sample it without blocking a UI or worker
+/// thread.
+pub trait DirectoryWatch: 'static {
+    fn revision(&self) -> u64;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -54,6 +71,7 @@ pub struct FileOperationResult {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FileSystemOperation {
     ReadDirectory,
+    WatchDirectory,
     CountDirectoryItems,
     ReadMetadata,
     Rename,

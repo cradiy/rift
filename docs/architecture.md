@@ -44,11 +44,16 @@ cannot replace a newer directory or navigation snapshot. The selected paths,
 active item and range-selection anchor live in `BrowserState`, including atomic
 selection replacement for marquee and keyboard range selection.
 
+Silent directory snapshots preserve selection by path. When every selected
+path disappears, the previous active position selects its new neighbor instead
+of clearing selection or moving focus elsewhere.
+
 ### `rift-fs`
 
 Implements the core ports with the host filesystem. It owns:
 
 - directory enumeration and metadata conversion;
+- non-recursive native directory watching with lightweight revision signals;
 - standard Linux user-directory discovery;
 - `/proc/self/mountinfo` parsing and removable-device discovery;
 - rename, create, recursive copy, move and collision-safe copy naming;
@@ -162,6 +167,22 @@ GPUI event
   -> BrowserState::update
   -> observed GPUI re-render
 ```
+
+External filesystem changes follow a quieter path:
+
+```text
+native non-recursive directory event
+  -> debounced revision signal
+  -> BrowserController background read
+  -> DirectoryChanged silent snapshot
+  -> preserve selection where paths still exist
+  -> observed GPUI re-render without Loading, focus or scroll reset
+```
+
+Each browser controller watches only its current directory. Event bursts are
+coalesced before reading, and a second read is deferred while one is already in
+flight. Manual refresh remains available when a platform watcher cannot be
+created.
 
 ### Filesystem commands
 

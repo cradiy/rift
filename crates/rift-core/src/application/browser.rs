@@ -74,6 +74,7 @@ pub struct BrowserState {
     show_hidden_files: bool,
     load_state: LoadState,
     next_request_id: u64,
+    snapshot_revision: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -104,6 +105,10 @@ pub enum BrowserMessage {
         request_id: u64,
         entries: Vec<Entry>,
     },
+    DirectoryChanged {
+        path: PathBuf,
+        entries: Vec<Entry>,
+    },
     DirectoryLoadFailed {
         path: PathBuf,
         request_id: u64,
@@ -132,6 +137,7 @@ impl BrowserState {
             show_hidden_files: false,
             load_state: LoadState::Idle,
             next_request_id: 0,
+            snapshot_revision: 0,
         }
     }
 
@@ -179,6 +185,10 @@ impl BrowserState {
 
     pub fn load_state(&self) -> &LoadState {
         &self.load_state
+    }
+
+    pub fn snapshot_revision(&self) -> u64 {
+        self.snapshot_revision
     }
 
     pub fn can_go_back(&self) -> bool {
@@ -328,9 +338,7 @@ impl BrowserState {
                 request_id,
                 entries,
             } if self.is_current_request(&path, request_id) => {
-                self.entries = entries;
-                self.sort_entries();
-                self.clear_selection();
+                self.replace_entries_preserving_selection(entries);
                 if let Some(path) = self.selection_after_load.take()
                     && self.entries.iter().any(|entry| {
                         entry.path() == path && (self.show_hidden_files || !entry.is_hidden())
@@ -339,6 +347,14 @@ impl BrowserState {
                     self.select_single(path);
                 }
                 self.load_state = LoadState::Idle;
+                self.snapshot_revision = self.snapshot_revision.wrapping_add(1);
+                Vec::new()
+            }
+            BrowserMessage::DirectoryChanged { path, entries }
+                if path == self.current_directory && matches!(self.load_state, LoadState::Idle) =>
+            {
+                self.replace_entries_preserving_selection(entries);
+                self.snapshot_revision = self.snapshot_revision.wrapping_add(1);
                 Vec::new()
             }
             BrowserMessage::DirectoryLoadFailed {
@@ -356,6 +372,7 @@ impl BrowserState {
             | BrowserMessage::GoForward
             | BrowserMessage::GoUp
             | BrowserMessage::DirectoryLoaded { .. }
+            | BrowserMessage::DirectoryChanged { .. }
             | BrowserMessage::DirectoryLoadFailed { .. } => Vec::new(),
         }
     }
@@ -391,6 +408,49 @@ impl BrowserState {
             .is_none_or(|path| !self.selection.contains(path))
         {
             self.active_selection = self.selection.iter().next().cloned();
+        }
+        if self
+            .selection_anchor
+            .as_ref()
+            .is_none_or(|path| !self.selection.contains(path))
+        {
+            self.selection_anchor = self.active_selection.clone();
+        }
+    }
+
+    fn replace_entries_preserving_selection(&mut self, entries: Vec<Entry>) {
+        let had_selection = !self.selection.is_empty();
+        let previous_active_index = self.active_selection.as_ref().and_then(|active| {
+            self.visible_entries()
+                .position(|entry| entry.path() == active)
+        });
+
+        self.entries = entries;
+        self.sort_entries();
+        let visible_paths = self
+            .visible_entries()
+            .map(|entry| entry.path().to_path_buf())
+            .collect::<Vec<_>>();
+        self.selection
+            .retain(|path| visible_paths.iter().any(|visible| visible == path));
+
+        if self.selection.is_empty() && had_selection && !visible_paths.is_empty() {
+            let index = previous_active_index
+                .unwrap_or_default()
+                .min(visible_paths.len() - 1);
+            self.select_single(visible_paths[index].clone());
+            return;
+        }
+
+        if self
+            .active_selection
+            .as_ref()
+            .is_none_or(|path| !self.selection.contains(path))
+        {
+            self.active_selection = visible_paths
+                .iter()
+                .find(|path| self.selection.contains(*path))
+                .cloned();
         }
         if self
             .selection_anchor
@@ -612,6 +672,126 @@ mod tests {
         assert_eq!(state.selection().len(), 1);
         assert_eq!(state.active_selection(), Some(renamed.as_path()));
         assert_eq!(state.selection_anchor(), Some(renamed.as_path()));
+    }
+
+    #[test]
+    fn automatic_directory_changes_preserve_selection_without_entering_loading_state() {
+        let directory = PathBuf::from("/home/me");
+        let first = directory.join("first.txt");
+        let second = directory.join("second.txt");
+        let mut state = BrowserState::new(directory.clone());
+        let effects = state.update(BrowserMessage::Refresh);
+        let [BrowserEffect::ReadDirectory { request_id, .. }] = effects.as_slice() else {
+            panic!("refresh should emit one read effect");
+        };
+        state.update(BrowserMessage::DirectoryLoaded {
+            path: directory.clone(),
+            request_id: *request_id,
+            entries: vec![
+                Entry::new(
+                    first.clone(),
+                    OsString::from("first.txt"),
+                    EntryKind::File,
+                    1,
+                    None,
+                    false,
+                ),
+                Entry::new(
+                    second.clone(),
+                    OsString::from("second.txt"),
+                    EntryKind::File,
+                    2,
+                    None,
+                    false,
+                ),
+            ],
+        });
+        state.update(BrowserMessage::Select {
+            path: second.clone(),
+            mode: SelectionMode::Replace,
+        });
+        let revision = state.snapshot_revision();
+
+        state.update(BrowserMessage::DirectoryChanged {
+            path: directory,
+            entries: vec![
+                Entry::new(
+                    first,
+                    OsString::from("first.txt"),
+                    EntryKind::File,
+                    10,
+                    None,
+                    false,
+                ),
+                Entry::new(
+                    second.clone(),
+                    OsString::from("second.txt"),
+                    EntryKind::File,
+                    20,
+                    None,
+                    false,
+                ),
+            ],
+        });
+
+        assert_eq!(state.load_state(), &LoadState::Idle);
+        assert_eq!(state.active_selection(), Some(second.as_path()));
+        assert_eq!(state.selection_anchor(), Some(second.as_path()));
+        assert_eq!(state.snapshot_revision(), revision + 1);
+    }
+
+    #[test]
+    fn automatic_refresh_selects_the_next_item_when_the_active_item_disappears() {
+        let directory = PathBuf::from("/home/me");
+        let first = directory.join("first.txt");
+        let second = directory.join("second.txt");
+        let third = directory.join("third.txt");
+        let mut state = BrowserState::new(directory.clone());
+        let effects = state.update(BrowserMessage::Refresh);
+        let [BrowserEffect::ReadDirectory { request_id, .. }] = effects.as_slice() else {
+            panic!("refresh should emit one read effect");
+        };
+        state.update(BrowserMessage::DirectoryLoaded {
+            path: directory.clone(),
+            request_id: *request_id,
+            entries: [first.clone(), second.clone(), third.clone()]
+                .into_iter()
+                .map(|path| {
+                    Entry::new(
+                        path.clone(),
+                        path.file_name().unwrap().to_os_string(),
+                        EntryKind::File,
+                        1,
+                        None,
+                        false,
+                    )
+                })
+                .collect(),
+        });
+        state.update(BrowserMessage::Select {
+            path: second,
+            mode: SelectionMode::Replace,
+        });
+
+        state.update(BrowserMessage::DirectoryChanged {
+            path: directory,
+            entries: [first, third.clone()]
+                .into_iter()
+                .map(|path| {
+                    Entry::new(
+                        path.clone(),
+                        path.file_name().unwrap().to_os_string(),
+                        EntryKind::File,
+                        1,
+                        None,
+                        false,
+                    )
+                })
+                .collect(),
+        });
+
+        assert_eq!(state.active_selection(), Some(third.as_path()));
+        assert_eq!(state.selection_anchor(), Some(third.as_path()));
     }
 
     #[test]
