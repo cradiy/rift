@@ -11,5 +11,6 @@ cargo run -p rift
 
 - [Architecture](docs/architecture.md)
 - [Keyboard shortcuts](docs/keyboard-shortcuts.md)
+- [File operations](docs/file-operations.md)
 - [Configuration](docs/configuration.md)
 - [Example configuration](config.toml.example)

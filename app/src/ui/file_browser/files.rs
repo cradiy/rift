@@ -427,6 +427,7 @@ impl FileBrowser {
         let path = entry.path.clone();
         let is_directory = entry.is_directory;
         let selected = entry.selected;
+        let cut = controller.read(cx).is_cut(&path);
         let drag = FileDrag::for_entry(entry.clone(), controller.clone(), cx);
         let drop_path = path.clone();
         let drop_controller = controller.clone();
@@ -558,27 +559,32 @@ impl FileBrowser {
             .on_drag_end::<FileDrag>(|outcome, drag, _, cx| {
                 finish_file_drag(*outcome, drag, cx);
             })
-            .child(if entry.is_directory {
-                FolderIcon::new()
-                    .size(px(96.))
-                    .glyph(icon)
-                    .into_any_element()
-            } else if entry.category == EntryCategory::Image {
-                ImageThumbnail::new(
-                    entry.path.clone(),
-                    entry.modified_at,
-                    entry.byte_len,
-                    ImageThumbnailLayout::Grid,
-                )
-                .into_any_element()
-            } else {
-                Self::file_icon(show_category.then_some(entry.category)).into_any_element()
-            })
+            .child(
+                div()
+                    .opacity(if cut { 0.45 } else { 1. })
+                    .child(if entry.is_directory {
+                        FolderIcon::new()
+                            .size(px(96.))
+                            .glyph(icon)
+                            .into_any_element()
+                    } else if entry.category == EntryCategory::Image {
+                        ImageThumbnail::new(
+                            entry.path.clone(),
+                            entry.modified_at,
+                            entry.byte_len,
+                            ImageThumbnailLayout::Grid,
+                        )
+                        .into_any_element()
+                    } else {
+                        Self::file_icon(show_category.then_some(entry.category)).into_any_element()
+                    }),
+            )
             .child(if let Some(rename) = entry_rename {
                 Self::inline_rename_field(rename, InlineRenameLayout::Grid, browser)
             } else {
                 div()
                     .w_full()
+                    .opacity(if cut { 0.55 } else { 1. })
                     .flex_none()
                     .px(px(4.))
                     .overflow_hidden()
@@ -772,6 +778,7 @@ impl FileBrowser {
         let context_path = path.clone();
         let context_entry = entry.clone();
         let context_selected = entry.selected;
+        let cut = controller.read(_cx).is_cut(&path);
         let drag = FileDrag::for_entry(entry.clone(), controller.clone(), _cx);
         let drop_path = path.clone();
         let drop_controller = controller.clone();
@@ -887,6 +894,7 @@ impl FileBrowser {
                     .child(
                         div()
                             .min_w_0()
+                            .opacity(if cut { 0.5 } else { 1. })
                             .flex()
                             .items_center()
                             .gap(px(9.))

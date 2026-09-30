@@ -13,7 +13,8 @@ use uic::{assets::LucideIcons, components::toast};
 
 use crate::{
     presentation::{
-        BrowserController, BrowserItem, ItemIcon, present_browser, start_browser_transfer,
+        BrowserController, BrowserItem, ItemIcon, SharedFileClipboard, present_browser,
+        start_browser_transfer,
     },
     ui::components::{FolderIcon, ImageThumbnail, ImageThumbnailLayout},
 };
@@ -28,6 +29,8 @@ pub(crate) struct FileDrag {
     visual: BrowserItem,
     native: Rc<Cell<bool>>,
     copy_requested: Rc<Cell<bool>>,
+    clipboard: SharedFileClipboard,
+    clipboard_generation: u64,
 }
 
 impl FileDrag {
@@ -42,6 +45,8 @@ impl FileDrag {
             .current_directory()
             .to_path_buf();
         let paths = controller.read(cx).selected_paths_or(entry.path.clone());
+        let clipboard = controller.read(cx).clipboard_handle();
+        let clipboard_generation = clipboard.generation();
         Self {
             paths,
             source_directory,
@@ -49,6 +54,8 @@ impl FileDrag {
             visual: entry,
             native: Rc::new(Cell::new(false)),
             copy_requested: Rc::new(Cell::new(false)),
+            clipboard,
+            clipboard_generation,
         }
     }
 
@@ -306,8 +313,9 @@ pub(crate) fn finish_file_drag(outcome: DragEnd, drag: &FileDrag, cx: &mut App) 
                 .collect::<Vec<_>>();
             let selection_after_move = successor_after_removal(&ordered_paths, &drag.paths);
             let moved_paths = drag.paths.clone();
+            drag.clipboard
+                .complete_move(drag.clipboard_generation, &moved_paths, cx);
             drag.source_controller.update(cx, |controller, cx| {
-                controller.forget_clipboard_paths(&moved_paths);
                 let message = selection_after_move
                     .map_or(BrowserMessage::Refresh, BrowserMessage::RefreshSelecting);
                 controller.dispatch(message, cx);
@@ -360,7 +368,7 @@ pub(crate) fn trash_dragged_files(drag: &FileDrag, cx: &mut App) {
         cx.update(|cx| match result {
             Ok(_) => {
                 source_controller.update(cx, |controller, cx| {
-                    controller.forget_clipboard_paths(&removed_paths);
+                    controller.forget_clipboard_paths(&removed_paths, cx);
                     let message = selection_after_removal
                         .map_or(BrowserMessage::Refresh, BrowserMessage::RefreshSelecting);
                     controller.dispatch(message, cx);

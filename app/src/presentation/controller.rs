@@ -4,10 +4,13 @@ use std::{
     time::Duration,
 };
 
-use gpui::{AppContext, Context, Task};
+use gpui::{App, AppContext, Context, Entity, Global, Task};
 use rift_core::{
     application::{BrowserEffect, BrowserMessage, BrowserState, LoadState},
-    ports::{DirectoryWatch, FileOperation, FileOperationResult, FileSystem, FileSystemError},
+    ports::{
+        DirectoryWatch, FileOperation, FileOperationResult, FileSystem, FileSystemError,
+        TransferKind, TransferRequest,
+    },
 };
 
 use crate::config::AppConfig;
@@ -25,13 +28,69 @@ pub(crate) struct BrowserController {
 const DIRECTORY_WATCH_POLL_INTERVAL: Duration = Duration::from_millis(220);
 
 #[derive(Clone, Default)]
-pub(crate) struct SharedFileClipboard(Arc<Mutex<Vec<PathBuf>>>);
+pub(crate) struct SharedFileClipboard(Arc<Mutex<FileClipboard>>);
+
+#[derive(Default)]
+struct FileClipboard {
+    paths: Vec<PathBuf>,
+    cut: bool,
+    generation: u64,
+}
+
+struct ClipboardUpdates(Entity<()>);
+impl Global for ClipboardUpdates {}
 
 impl SharedFileClipboard {
-    fn read(&self) -> std::sync::MutexGuard<'_, Vec<PathBuf>> {
+    fn read(&self) -> std::sync::MutexGuard<'_, FileClipboard> {
         self.0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    pub(crate) fn updates(cx: &mut App) -> Entity<()> {
+        if let Some(updates) = cx.try_global::<ClipboardUpdates>() {
+            return updates.0.clone();
+        }
+        let updates = cx.new(|_| ());
+        cx.set_global(ClipboardUpdates(updates.clone()));
+        updates
+    }
+
+    fn notify(cx: &mut App) {
+        Self::updates(cx).update(cx, |_, cx| cx.notify());
+    }
+
+    fn set(&self, paths: Vec<PathBuf>, cut: bool, cx: &mut App) -> usize {
+        if paths.is_empty() {
+            return 0;
+        }
+        let count = paths.len();
+        {
+            let mut clipboard = self.read();
+            clipboard.generation = clipboard.generation.wrapping_add(1);
+            clipboard.paths = paths;
+            clipboard.cut = cut;
+        }
+        Self::notify(cx);
+        count
+    }
+
+    pub(crate) fn generation(&self) -> u64 {
+        self.read().generation
+    }
+
+    pub(crate) fn complete_move(&self, generation: u64, paths: &[PathBuf], cx: &mut App) {
+        if paths.is_empty() {
+            return;
+        }
+        {
+            let mut clipboard = self.read();
+            if clipboard.generation != generation || !clipboard.cut {
+                return;
+            }
+            clipboard.paths.retain(|path| !paths.contains(path));
+        }
+        Self::notify(cx);
     }
 }
 
@@ -82,31 +141,68 @@ impl BrowserController {
         }
     }
 
-    pub(crate) fn copy_selected(&mut self) -> usize {
-        let selected = self.selected_paths();
-        let count = selected.len();
-        *self.clipboard.read() = selected;
-        count
+    pub(crate) fn copy_selected(&mut self, cx: &mut App) -> usize {
+        self.clipboard.set(self.selected_paths(), false, cx)
     }
 
-    pub(crate) fn copy_selection(&mut self, fallback: std::path::PathBuf) -> usize {
-        let selected = self.selected_paths();
-        let clipboard = if selected.contains(&fallback) && !selected.is_empty() {
-            selected
-        } else {
-            vec![fallback]
-        };
-        let count = clipboard.len();
-        *self.clipboard.read() = clipboard;
-        count
+    pub(crate) fn copy_selection(&mut self, fallback: PathBuf, cx: &mut App) -> usize {
+        self.clipboard
+            .set(self.selected_paths_or(fallback), false, cx)
+    }
+
+    pub(crate) fn cut_selected(&mut self, cx: &mut App) -> usize {
+        if self.state.is_trash() {
+            return 0;
+        }
+        self.clipboard.set(self.selected_paths(), true, cx)
+    }
+
+    pub(crate) fn cut_selection(&mut self, fallback: PathBuf, cx: &mut App) -> usize {
+        if self.state.is_trash() {
+            return 0;
+        }
+        self.clipboard
+            .set(self.selected_paths_or(fallback), true, cx)
+    }
+
+    pub(crate) fn is_cut(&self, path: &std::path::Path) -> bool {
+        let clipboard = self.clipboard.read();
+        clipboard.cut && clipboard.paths.iter().any(|item| item == path)
+    }
+
+    pub(crate) fn clipboard_handle(&self) -> SharedFileClipboard {
+        self.clipboard.clone()
+    }
+
+    pub(crate) fn paste_request(&self, directory: PathBuf) -> Option<TransferRequest> {
+        let clipboard = self.clipboard.read();
+        let sources = clipboard
+            .paths
+            .iter()
+            .filter(|path| !clipboard.cut || path.parent() != Some(directory.as_path()))
+            .cloned()
+            .collect::<Vec<_>>();
+        (!sources.is_empty()).then_some(TransferRequest {
+            kind: if clipboard.cut {
+                TransferKind::Move
+            } else {
+                TransferKind::Copy
+            },
+            sources,
+            directory,
+        })
     }
 
     pub(crate) fn clipboard(&self) -> Vec<PathBuf> {
-        self.clipboard.read().clone()
+        self.clipboard.read().paths.clone()
     }
 
-    pub(crate) fn forget_clipboard_paths(&mut self, paths: &[std::path::PathBuf]) {
-        self.clipboard.read().retain(|path| !paths.contains(path));
+    pub(crate) fn forget_clipboard_paths(&mut self, paths: &[PathBuf], cx: &mut App) {
+        self.clipboard
+            .read()
+            .paths
+            .retain(|path| !paths.contains(path));
+        SharedFileClipboard::notify(cx);
     }
 
     pub(crate) fn perform(
@@ -305,15 +401,74 @@ impl BrowserController {
 mod tests {
     use std::path::PathBuf;
 
-    use super::SharedFileClipboard;
+    use super::{BrowserController, SharedFileClipboard};
+    use gpui::{AppContext, TestAppContext};
+    use rift_core::{application::BrowserState, ports::TransferKind};
+    use rift_fs::LocalFileSystem;
+    use std::sync::Arc;
+
+    #[gpui::test]
+    fn clipboard_mode_is_shared_and_an_old_move_cannot_clear_a_new_cut(cx: &mut TestAppContext) {
+        let clipboard = SharedFileClipboard::default();
+        let root = PathBuf::from("/tmp/source");
+        let path = root.join("file.txt");
+        let first = cx.new(|_| {
+            BrowserController::with_clipboard(
+                BrowserState::new(root.clone()),
+                Arc::new(LocalFileSystem),
+                clipboard.clone(),
+            )
+        });
+        let second = cx.new(|_| {
+            BrowserController::with_clipboard(
+                BrowserState::new(PathBuf::from("/tmp/target")),
+                Arc::new(LocalFileSystem),
+                clipboard.clone(),
+            )
+        });
+        cx.update(|cx| {
+            first.update(cx, |controller, cx| {
+                controller.cut_selection(path.clone(), cx)
+            });
+            assert!(second.read(cx).is_cut(&path));
+            assert!(second.read(cx).paste_request(root.clone()).is_none());
+            assert_eq!(
+                second
+                    .read(cx)
+                    .paste_request(PathBuf::from("/tmp/target"))
+                    .unwrap()
+                    .kind,
+                TransferKind::Move
+            );
+            let old_generation = clipboard.generation();
+            second.update(cx, |controller, cx| {
+                controller.copy_selection(path.clone(), cx)
+            });
+            assert!(!first.read(cx).is_cut(&path));
+            assert_eq!(
+                first.read(cx).paste_request(root.clone()).unwrap().kind,
+                TransferKind::Copy
+            );
+            second.update(cx, |controller, cx| {
+                controller.cut_selection(path.clone(), cx)
+            });
+            clipboard.complete_move(old_generation, std::slice::from_ref(&path), cx);
+            assert!(first.read(cx).is_cut(&path));
+            clipboard.complete_move(clipboard.generation(), std::slice::from_ref(&path), cx);
+            assert!(second.read(cx).clipboard().is_empty());
+        });
+    }
 
     #[test]
     fn cloned_file_clipboards_share_the_same_paths() {
         let first = SharedFileClipboard::default();
         let second = first.clone();
 
-        first.read().push(PathBuf::from("/tmp/copied"));
+        first.read().paths.push(PathBuf::from("/tmp/copied"));
 
-        assert_eq!(second.read().as_slice(), [PathBuf::from("/tmp/copied")]);
+        assert_eq!(
+            second.read().paths.as_slice(),
+            [PathBuf::from("/tmp/copied")]
+        );
     }
 }

@@ -38,7 +38,8 @@ use uic::{
 use crate::{
     config::AppConfig,
     presentation::{
-        BrowserController, BrowserItem, NavigationController, format_size, present_browser,
+        BrowserController, BrowserItem, NavigationController, SharedFileClipboard, format_size,
+        present_browser,
     },
 };
 
@@ -160,6 +161,11 @@ impl FileBrowser {
     ) -> Self {
         cx.observe(&controller, |_, _, cx| cx.notify()).detach();
         cx.observe(&navigation, |_, _, cx| cx.notify()).detach();
+        let transfers = crate::presentation::TransferTasks::entity(cx);
+        cx.observe(&transfers, |_, _, cx| cx.notify()).detach();
+        let clipboard_updates = SharedFileClipboard::updates(cx);
+        cx.observe(&clipboard_updates, |_, _, cx| cx.notify())
+            .detach();
         let search_input = cx.new(|cx| TextInput::new(cx).placeholder("Search"));
         cx.subscribe(&search_input, |browser, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change(_)) {
@@ -657,6 +663,7 @@ impl FileBrowser {
                 selection_status,
                 self.vim_trash_confirmation.as_deref(),
                 &load_state,
+                cx,
             ))
             .into_any_element()
     }
@@ -668,6 +675,7 @@ impl FileBrowser {
         selection_status: Option<String>,
         vim_trash_confirmation: Option<&[PathBuf]>,
         load_state: &LoadState,
+        cx: &mut App,
     ) -> gpui::AnyElement {
         if let (LoadState::Idle, Some(paths)) = (load_state, vim_trash_confirmation) {
             return div()
@@ -774,6 +782,7 @@ impl FileBrowser {
             .flex()
             .items_center()
             .justify_end()
+            .gap(px(8.))
             .border_t_1()
             .border_color(rgba(0xffffff10))
             .text_xs()
@@ -793,6 +802,7 @@ impl FileBrowser {
                     })
                     .child(status),
             )
+            .children(crate::ui::transfers::indicator(cx))
             .into_any_element()
     }
 }
@@ -905,7 +915,12 @@ impl Render for FileBrowser {
             .w(content_width)
             .min_w_0()
             .flex()
-            .child(content);
+            .child(content)
+            .child(crate::ui::transfers::layer(
+                window,
+                f32::from(content_width),
+                cx,
+            ));
         let content_frame = if self.sidebar_animated {
             content_frame
                 .with_animation(
@@ -966,6 +981,7 @@ impl Render for FileBrowser {
             .on_action(cx.listener(Self::rename_selection))
             .on_action(cx.listener(Self::get_info_selection))
             .on_action(cx.listener(Self::copy_items))
+            .on_action(cx.listener(Self::cut_items))
             .on_action(cx.listener(Self::paste_items))
             .on_action(cx.listener(Self::trash_items))
             .on_action(cx.listener(Self::request_vim_trash))

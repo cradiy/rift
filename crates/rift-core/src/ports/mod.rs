@@ -8,6 +8,7 @@ pub use file_system::{
 };
 pub use navigation_source::{NavigationError, NavigationSource};
 pub use transfer::{
-    TransferCancellation, TransferFailure, TransferKind, TransferPhase, TransferProgress,
+    ConflictChoice, ConflictDecision, ConflictEntry, TransferCancellation, TransferConflict,
+    TransferFailure, TransferKind, TransferOptions, TransferPhase, TransferProgress,
     TransferReport, TransferRequest, TransferredItem,
 };

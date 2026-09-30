@@ -283,16 +283,7 @@ impl FileBrowser {
                     ContextMenuItem::action_with(
                         |_, _| Self::menu_label(LucideIcons::Copy, "Paste Items"),
                         move |_, cx| {
-                            let sources = paste_controller.read(cx).clipboard();
-                            Self::run_operation(
-                                paste_controller.clone(),
-                                FileOperation::CopyInto {
-                                    sources,
-                                    directory: paste_directory.clone(),
-                                },
-                                "Pasted items",
-                                cx,
-                            );
+                            Self::paste_into(paste_controller.clone(), paste_directory.clone(), cx);
                         },
                     )
                     .shortcut("Ctrl+V")
@@ -337,6 +328,8 @@ impl FileBrowser {
         let rename_name = entry.name.clone();
         let copy_controller = controller.clone();
         let copy_path = path.clone();
+        let cut_controller = controller.clone();
+        let cut_path = path.clone();
         let move_controller = controller.clone();
         let move_path = path.clone();
         let paste_controller = controller.clone();
@@ -405,8 +398,8 @@ impl FileBrowser {
                 ContextMenuItem::action_with(
                     |_, _| Self::menu_label(LucideIcons::Copy, "Copy"),
                     move |_, cx| {
-                        let count = copy_controller.update(cx, |controller, _| {
-                            controller.copy_selection(copy_path.clone())
+                        let count = copy_controller.update(cx, |controller, cx| {
+                            controller.copy_selection(copy_path.clone(), cx)
                         });
                         toast::success(
                             if count == 1 {
@@ -420,6 +413,24 @@ impl FileBrowser {
                 )
                 .shortcut("Ctrl+C"),
             )
+            .item(
+                ContextMenuItem::action_with(
+                    |_, _| Self::menu_label(LucideIcons::Scissors, "Cut"),
+                    move |_, cx| {
+                        let count = cut_controller.update(cx, |controller, cx| {
+                            controller.cut_selection(cut_path.clone(), cx)
+                        });
+                        toast::success(
+                            format!(
+                                "Cut {count} item{} · Paste to move",
+                                if count == 1 { "" } else { "s" }
+                            ),
+                            cx,
+                        );
+                    },
+                )
+                .shortcut("Ctrl+X"),
+            )
             .item(ContextMenuItem::action_with(
                 |_, _| Self::menu_label(LucideIcons::FolderOpen, "Move…"),
                 move |window, cx| {
@@ -432,16 +443,7 @@ impl FileBrowser {
                 ContextMenuItem::action_with(
                     |_, _| Self::menu_label(LucideIcons::Copy, "Paste Into Folder"),
                     move |_, cx| {
-                        let sources = paste_controller.read(cx).clipboard();
-                        Self::run_operation(
-                            paste_controller.clone(),
-                            FileOperation::CopyInto {
-                                sources,
-                                directory: paste_directory.clone(),
-                            },
-                            "Pasted items",
-                            cx,
-                        );
+                        Self::paste_into(paste_controller.clone(), paste_directory.clone(), cx);
                     },
                 )
                 .shortcut("Ctrl+V")
@@ -526,8 +528,8 @@ impl FileBrowser {
                     ContextMenuItem::action_with(
                         |_, _| Self::menu_label(LucideIcons::Copy, "Copy"),
                         move |_, cx| {
-                            let count = copy_controller.update(cx, |controller, _| {
-                                controller.copy_selection(copy_path.clone())
+                            let count = copy_controller.update(cx, |controller, cx| {
+                                controller.copy_selection(copy_path.clone(), cx)
                             });
                             toast::success(
                                 if count == 1 {

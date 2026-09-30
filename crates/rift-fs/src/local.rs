@@ -14,8 +14,8 @@ use rift_core::{
     domain::{Entry, EntryKind, is_trash_location, trash_location_path},
     ports::{
         DirectoryWatch, FileOperation, FileOperationResult, FileSystem, FileSystemError,
-        FileSystemOperation, TransferCancellation, TransferProgress, TransferReport,
-        TransferRequest,
+        FileSystemOperation, TransferCancellation, TransferOptions, TransferProgress,
+        TransferReport, TransferRequest,
     },
 };
 
@@ -23,6 +23,15 @@ use rift_core::{
 pub struct LocalFileSystem;
 
 impl FileSystem for LocalFileSystem {
+    fn transfer_with_options(
+        &self,
+        request: TransferRequest,
+        options: TransferOptions,
+        cancel: &TransferCancellation,
+        progress: &mut dyn FnMut(TransferProgress),
+    ) -> TransferReport {
+        crate::transfer::run_with_options(request, Some(options), cancel, progress)
+    }
     fn transfer(
         &self,
         request: TransferRequest,
@@ -364,7 +373,7 @@ pub(super) fn available_copy_destination(
         )
     })?;
     let direct = directory.join(name);
-    if !direct.exists() {
+    if !entry_exists(&direct)? {
         return Ok(direct);
     }
 
@@ -386,11 +395,23 @@ pub(super) fn available_copy_destination(
             _ => format!("{stem}{suffix}"),
         };
         let candidate = directory.join(candidate_name);
-        if !candidate.exists() {
+        if !entry_exists(&candidate)? {
             return Ok(candidate);
         }
     }
     unreachable!()
+}
+
+fn entry_exists(path: &Path) -> Result<bool, FileSystemError> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(FileSystemError::new(
+            FileSystemOperation::Copy,
+            path,
+            error.to_string(),
+        )),
+    }
 }
 
 pub(super) fn remove_entry(path: &Path) -> std::io::Result<()> {

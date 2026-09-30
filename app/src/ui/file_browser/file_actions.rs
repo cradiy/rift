@@ -534,7 +534,7 @@ impl FileBrowser {
                 Ok(FileOperationResult { affected_paths }) => {
                     controller.update(cx, |controller, cx| {
                         if let Some(paths) = removed_paths.as_deref() {
-                            controller.forget_clipboard_paths(paths);
+                            controller.forget_clipboard_paths(paths, cx);
                         }
                         let message = if let Some(path) = selection_after_removal {
                             BrowserMessage::RefreshSelecting(path)
@@ -554,6 +554,16 @@ impl FileBrowser {
             });
         })
         .detach();
+    }
+
+    pub(super) fn paste_into(
+        controller: Entity<BrowserController>,
+        directory: PathBuf,
+        cx: &mut App,
+    ) {
+        if let Some(request) = controller.read(cx).paste_request(directory) {
+            start_browser_transfer(&controller, request, Vec::new(), cx);
+        }
     }
 }
 

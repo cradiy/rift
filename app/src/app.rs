@@ -16,7 +16,7 @@ use uic::components::{context_menu, modal, toast};
 use crate::{
     config::AppConfig,
     logging,
-    presentation::{NavigationController, SharedFileClipboard, TransferTasks},
+    presentation::{NavigationController, SharedFileClipboard},
 };
 
 use self::tabs::{BrowserTab, TabStripState};
@@ -154,8 +154,6 @@ impl RiftApp {
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) -> Self {
-        let transfers = TransferTasks::entity(cx);
-        cx.observe(&transfers, |_, _, cx| cx.notify()).detach();
         let navigation = cx.new(|cx| NavigationController::new(navigation_source, cx));
         let mut app = Self {
             tabs: Vec::new(),
@@ -277,8 +275,7 @@ impl Render for RiftApp {
             } else {
                 root
             };
-        root.child(crate::ui::transfers::layer(window, cx))
-            .child(toast::layer(cx))
+        root.child(toast::layer(cx))
             .child(context_menu::layer(cx))
             .child(modal::layer(cx))
     }

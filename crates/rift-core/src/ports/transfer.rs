@@ -4,6 +4,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
+    time::SystemTime,
 };
 
 use super::{FileOperation, FileSystemError};
@@ -12,6 +13,47 @@ use super::{FileOperation, FileSystemError};
 pub enum TransferKind {
     Copy,
     Move,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConflictChoice {
+    KeepBoth,
+    Skip,
+    Replace,
+}
+
+/// Metadata captured at the prompt, used to reject a stale replacement choice.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConflictEntry {
+    pub byte_len: u64,
+    pub modified: Option<SystemTime>,
+    pub is_directory: bool,
+    pub is_symlink: bool,
+    pub device: u64,
+    pub inode: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TransferConflict {
+    pub source: PathBuf,
+    pub destination: PathBuf,
+    pub incoming: ConflictEntry,
+    pub existing: ConflictEntry,
+    pub replace_allowed: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct ConflictDecision {
+    pub conflict: TransferConflict,
+    pub choice: ConflictChoice,
+}
+
+/// A transfer yields at a conflict instead of blocking a worker for UI input.
+/// `decision` is one-shot; `policy` applies to subsequent conflicts in this task.
+#[derive(Clone, Debug, Default)]
+pub struct TransferOptions {
+    pub decision: Option<ConflictDecision>,
+    pub policy: Option<ConflictChoice>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -81,7 +123,10 @@ pub struct TransferProgress {
     pub transferred_bytes: u64,
     pub total_bytes: Option<u64>,
     pub completed_items: usize,
+    pub skipped_items: usize,
     pub total_items: usize,
+    /// Entries discovered recursively, including the selected roots.
+    pub total_entries: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -102,9 +147,11 @@ pub struct TransferFailure {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TransferReport {
     pub completed: Vec<TransferredItem>,
+    pub skipped: Vec<PathBuf>,
     pub failures: Vec<TransferFailure>,
     pub remaining: Vec<PathBuf>,
     pub cancelled: bool,
+    pub conflict: Option<TransferConflict>,
 }
 
 impl TransferReport {

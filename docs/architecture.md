@@ -206,7 +206,7 @@ Paste / Move / internal drop / external file drop
   -> TransferTasks (shared across tabs and windows)
   -> dyn FileSystem::transfer (background executor)
   -> TransferProgress / TransferReport
-  -> non-focusable glass task panel + silent directory refresh
+  -> status-bar pie indicator / non-focusable details + silent directory refresh
 ```
 
 Progress is published from the worker and sampled by the UI at most ten times
@@ -220,16 +220,39 @@ manual inspection and excluded from automatic retry.
 
 Batch failures are retained per source and do not stop unrelated items. Retry
 submits only failed, retryable sources and cancelled, unfinished sources. The
-panel can be collapsed while browsing and finished records can be dismissed.
+panel opens above a compact indicator at the right end of the file-area status
+bar, sharing space with selection/count text. Ordinary small transfers stay
+silent; large ones appear after a short delay without opening the details.
+Visible successes expire after three seconds, remaining only while the details
+are currently open, not merely because they were opened earlier. Closing expired
+details hides the result immediately. Conflicts and failures always open for attention. The panel
+can be collapsed while browsing and retained finished records can be dismissed.
 Successful history is bounded. Completion refreshes submitted source and target
 directories only when a participating browser still views them, preserving its
-current selection and focus. Copy collisions keep the existing copy-naming
-policy; move collisions are reported without overwriting the destination.
+current selection and focus. `FileSystem::transfer_with_options` yields a
+`TransferConflict` and unfinished sources instead of blocking a worker for UI
+input. The manager accumulates reports and resumes only unfinished sources after
+a choice. Keep-both, skip and atomic replacement are task-scoped; apply-to-all
+is opt-in. A stale conflict decision is rejected against captured source/target
+metadata. Replacement stages the new item on the target filesystem, atomically
+exchanges entries, and moves the displaced item to Trash, rolling back on failure.
+Folder replacement is whole-item replacement, not merging. Legacy noninteractive
+`perform` calls retain automatic copy naming and move-collision errors.
 
-The controller copy buffer stores source paths only for the current process.
+Copied files and directories are synced before source deletion. A copied-source
+metadata snapshot guards source removal; symbolic links are copied as links.
+This is not a persistent recovery journal or a guarantee against concurrent
+writers or hardware failure.
+
+The controller file buffer stores source paths, copy/cut mode and a generation
+only for the current process. Browser views observe a shared clipboard update
+signal, so cut artwork updates across tabs and windows without resetting layout.
 It is shared by every tab and any window detached from them, so a selection
-copied in one browser can be pasted in another. Paste performs `CopyInto`;
-Move uses an explicit destination. Trash and permanent deletion are separate
+copied or cut in one browser can be pasted in another. Paste creates a copy or
+move request according to the buffer mode. Move completion removes successful
+cut entries only if the submitted generation is still current. Pending moves
+reserve overlapping sources against repeated submission. Move also has an
+explicit destination action. Trash and permanent deletion are separate
 operations, and permanent deletion is exposed only while browsing Trash.
 
 File drag-and-drop reuses the same `FileOperation` boundary. Grid and list

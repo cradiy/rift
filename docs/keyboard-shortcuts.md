@@ -17,7 +17,7 @@ file name.
 | Space | Quick Look |
 | F2 | Rename |
 | Alt + Enter | Get Info |
-| Ctrl + C / Ctrl + V | Copy / paste items |
+| Ctrl + C / Ctrl + X / Ctrl + V | Copy / cut / paste items |
 | Ctrl + Shift + N | Create a folder |
 | Ctrl + A | Select all |
 | Ctrl + H | Show or hide hidden files |
@@ -32,6 +32,11 @@ file name.
 | Alt + Left / Alt + Right | Move backward / forward through directory history |
 
 Mouse selection supports Shift or Ctrl for toggling multiple items.
+
+Cut items remain in place and their icons and names are dimmed until pasted.
+Only successfully moved items leave the cut buffer. Copying or cutting another
+selection replaces the buffer; Escape keeps both the selection and buffer.
+See [File operations](file-operations.md) for transfer and conflict behavior.
 
 ## Vim mode
 

@@ -11,14 +11,14 @@ members = [
 
 [workspace.dependencies]
 
-gpui = { git = "https://github.com/cradiy/gpui.git", rev = "318a8bf424d02e7d657538c124e88e9fdf614c6e" }
-gpui_effects = { git = "https://github.com/cradiy/gpui.git", rev = "318a8bf424d02e7d657538c124e88e9fdf614c6e" }
-gpui_platform = { git = "https://github.com/cradiy/gpui.git", rev = "318a8bf424d02e7d657538c124e88e9fdf614c6e", features = [
+gpui = { git = "https://github.com/cradiy/gpui.git", rev = "52ea69f7b31d02f0f3332b5546d8fcd6982a0fd3" }
+gpui_effects = { git = "https://github.com/cradiy/gpui.git", rev = "52ea69f7b31d02f0f3332b5546d8fcd6982a0fd3" }
+gpui_platform = { git = "https://github.com/cradiy/gpui.git", rev = "52ea69f7b31d02f0f3332b5546d8fcd6982a0fd3", features = [
   "wayland",
   "x11",
 ] }
 image = "0.25.1"
-uic = { git = "https://github.com/cradiy/gpui.git", rev = "318a8bf424d02e7d657538c124e88e9fdf614c6e" }
+uic = { git = "https://github.com/cradiy/gpui.git", rev = "52ea69f7b31d02f0f3332b5546d8fcd6982a0fd3" }
 rift-config = { path = "crates/rift-config" }
 rift-core = { path = "crates/rift-core" }
 rift-fs = { path = "crates/rift-fs" }

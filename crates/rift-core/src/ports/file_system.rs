@@ -5,8 +5,8 @@ use std::{
 };
 
 use super::{
-    TransferCancellation, TransferFailure, TransferPhase, TransferProgress, TransferReport,
-    TransferRequest, TransferredItem,
+    TransferCancellation, TransferFailure, TransferOptions, TransferPhase, TransferProgress,
+    TransferReport, TransferRequest, TransferredItem,
 };
 use crate::domain::Entry;
 
@@ -70,6 +70,16 @@ pub trait FileSystem: Send + Sync + 'static {
             path,
             "directory watching is not supported",
         ))
+    }
+
+    fn transfer_with_options(
+        &self,
+        request: TransferRequest,
+        _options: TransferOptions,
+        cancel: &TransferCancellation,
+        progress: &mut dyn FnMut(TransferProgress),
+    ) -> TransferReport {
+        self.transfer(request, cancel, progress)
     }
 }
 

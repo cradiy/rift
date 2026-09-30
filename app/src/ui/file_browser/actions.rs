@@ -19,6 +19,7 @@ actions!(
         RenameSelection,
         GetInfoSelection,
         CopyItems,
+        CutItems,
         PasteItems,
         TrashItems,
         RequestVimTrash,
@@ -97,6 +98,7 @@ pub(crate) fn init(cx: &mut App) {
         KeyBinding::new("f2", RenameSelection, context),
         KeyBinding::new("alt-enter", GetInfoSelection, context),
         KeyBinding::new("ctrl-c", CopyItems, context),
+        KeyBinding::new("ctrl-x", CutItems, context),
         KeyBinding::new("ctrl-v", PasteItems, context),
         KeyBinding::new("ctrl-r", RefreshDirectory, context),
         KeyBinding::new("f5", RefreshDirectory, context),
@@ -569,7 +571,7 @@ impl FileBrowser {
     ) {
         let count = self
             .controller
-            .update(cx, |controller, _| controller.copy_selected());
+            .update(cx, |controller, cx| controller.copy_selected(cx));
         if count > 0 {
             toast::success(
                 if count == 1 {
@@ -591,22 +593,28 @@ impl FileBrowser {
         if self.controller.read(cx).state().is_trash() {
             return;
         }
-        let (sources, directory) = {
-            let controller = self.controller.read(cx);
-            (
-                controller.clipboard(),
-                controller.state().current_directory().to_path_buf(),
-            )
-        };
-        if sources.is_empty() {
-            return;
+        let directory = self
+            .controller
+            .read(cx)
+            .state()
+            .current_directory()
+            .to_path_buf();
+        Self::paste_into(self.controller.clone(), directory, cx);
+    }
+
+    pub(super) fn cut_items(&mut self, _: &CutItems, _: &mut Window, cx: &mut gpui::Context<Self>) {
+        let count = self
+            .controller
+            .update(cx, |controller, cx| controller.cut_selected(cx));
+        if count > 0 {
+            toast::success(
+                format!(
+                    "Cut {count} item{} · Paste to move",
+                    if count == 1 { "" } else { "s" }
+                ),
+                cx,
+            );
         }
-        Self::run_operation(
-            self.controller.clone(),
-            FileOperation::CopyInto { sources, directory },
-            "Pasted items",
-            cx,
-        );
     }
 
     pub(super) fn trash_items(
