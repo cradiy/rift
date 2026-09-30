@@ -237,6 +237,8 @@ impl RiftApp {
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) -> Self {
+        let transfers = crate::presentation::TransferTasks::entity(cx);
+        cx.observe(&transfers, |_, _, cx| cx.notify()).detach();
         let app = Self {
             tabs: vec![tab],
             tab_strip: TabStripState::default(),

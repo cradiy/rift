@@ -14,7 +14,8 @@ use rift_core::{
     domain::{Entry, EntryKind, is_trash_location, trash_location_path},
     ports::{
         DirectoryWatch, FileOperation, FileOperationResult, FileSystem, FileSystemError,
-        FileSystemOperation,
+        FileSystemOperation, TransferCancellation, TransferProgress, TransferReport,
+        TransferRequest,
     },
 };
 
@@ -22,6 +23,15 @@ use rift_core::{
 pub struct LocalFileSystem;
 
 impl FileSystem for LocalFileSystem {
+    fn transfer(
+        &self,
+        request: TransferRequest,
+        cancel: &TransferCancellation,
+        progress: &mut dyn FnMut(TransferProgress),
+    ) -> TransferReport {
+        crate::transfer::run(request, cancel, progress)
+    }
+
     fn read_directory(&self, path: &Path) -> Result<Vec<Entry>, FileSystemError> {
         if is_trash_location(path) {
             return read_trash_directory();
@@ -140,38 +150,20 @@ impl FileSystem for LocalFileSystem {
                     })?;
                 Ok(result(path))
             }
-            FileOperation::CopyInto { sources, directory } => {
-                ensure_directory(&directory, FileSystemOperation::Copy)?;
-                let mut affected_paths = Vec::with_capacity(sources.len());
-                for source in sources {
-                    ensure_not_inside_source(&source, &directory, FileSystemOperation::Copy)?;
-                    let destination = available_copy_destination(&source, &directory)?;
-                    if let Err(error) = copy_entry(&source, &destination) {
-                        let _ = remove_entry(&destination);
-                        return Err(error);
-                    }
-                    affected_paths.push(destination);
+            operation @ (FileOperation::CopyInto { .. } | FileOperation::MoveInto { .. }) => {
+                let request = TransferRequest::from_operation(&operation)
+                    .expect("copy and move operations produce transfer requests");
+                let report = self.transfer(request, &TransferCancellation::default(), &mut |_| {});
+                if let Some(failure) = report.failures.into_iter().next() {
+                    return Err(failure.error);
                 }
-                Ok(FileOperationResult { affected_paths })
-            }
-            FileOperation::MoveInto { sources, directory } => {
-                ensure_directory(&directory, FileSystemOperation::Move)?;
-                let mut affected_paths = Vec::with_capacity(sources.len());
-                for source in sources {
-                    ensure_not_inside_source(&source, &directory, FileSystemOperation::Move)?;
-                    let name = source.file_name().ok_or_else(|| {
-                        FileSystemError::new(
-                            FileSystemOperation::Move,
-                            &source,
-                            "the source has no file name",
-                        )
-                    })?;
-                    let destination = directory.join(name);
-                    ensure_available(&destination, FileSystemOperation::Move)?;
-                    move_entry(&source, &destination)?;
-                    affected_paths.push(destination);
-                }
-                Ok(FileOperationResult { affected_paths })
+                Ok(FileOperationResult {
+                    affected_paths: report
+                        .completed
+                        .into_iter()
+                        .map(|item| item.destination)
+                        .collect(),
+                })
             }
             FileOperation::Trash { paths } => {
                 if paths.is_empty() {
@@ -331,7 +323,10 @@ fn ensure_available(path: &Path, operation: FileSystemOperation) -> Result<(), F
     Ok(())
 }
 
-fn ensure_directory(path: &Path, operation: FileSystemOperation) -> Result<(), FileSystemError> {
+pub(super) fn ensure_directory(
+    path: &Path,
+    operation: FileSystemOperation,
+) -> Result<(), FileSystemError> {
     if !path.is_dir() {
         return Err(FileSystemError::new(
             operation,
@@ -342,7 +337,7 @@ fn ensure_directory(path: &Path, operation: FileSystemOperation) -> Result<(), F
     Ok(())
 }
 
-fn ensure_not_inside_source(
+pub(super) fn ensure_not_inside_source(
     source: &Path,
     directory: &Path,
     operation: FileSystemOperation,
@@ -357,7 +352,10 @@ fn ensure_not_inside_source(
     Ok(())
 }
 
-fn available_copy_destination(source: &Path, directory: &Path) -> Result<PathBuf, FileSystemError> {
+pub(super) fn available_copy_destination(
+    source: &Path,
+    directory: &Path,
+) -> Result<PathBuf, FileSystemError> {
     let name = source.file_name().ok_or_else(|| {
         FileSystemError::new(
             FileSystemOperation::Copy,
@@ -395,64 +393,7 @@ fn available_copy_destination(source: &Path, directory: &Path) -> Result<PathBuf
     unreachable!()
 }
 
-fn copy_entry(source: &Path, destination: &Path) -> Result<(), FileSystemError> {
-    let metadata = fs::symlink_metadata(source).map_err(|error| {
-        FileSystemError::new(FileSystemOperation::Copy, source, error.to_string())
-    })?;
-    if metadata.file_type().is_symlink() {
-        return Err(FileSystemError::new(
-            FileSystemOperation::Copy,
-            source,
-            "copying symbolic links is not supported yet",
-        ));
-    }
-    if metadata.is_dir() {
-        fs::create_dir(destination).map_err(|error| {
-            FileSystemError::new(FileSystemOperation::Copy, destination, error.to_string())
-        })?;
-        for entry in fs::read_dir(source).map_err(|error| {
-            FileSystemError::new(FileSystemOperation::Copy, source, error.to_string())
-        })? {
-            let entry = entry.map_err(|error| {
-                FileSystemError::new(FileSystemOperation::Copy, source, error.to_string())
-            })?;
-            copy_entry(&entry.path(), &destination.join(entry.file_name()))?;
-        }
-    } else if metadata.is_file() {
-        fs::copy(source, destination).map_err(|error| {
-            FileSystemError::new(FileSystemOperation::Copy, source, error.to_string())
-        })?;
-    } else {
-        return Err(FileSystemError::new(
-            FileSystemOperation::Copy,
-            source,
-            "this item type cannot be copied",
-        ));
-    }
-    Ok(())
-}
-
-fn move_entry(source: &Path, destination: &Path) -> Result<(), FileSystemError> {
-    match fs::rename(source, destination) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::CrossesDevices => {
-            if let Err(error) = copy_entry(source, destination) {
-                let _ = remove_entry(destination);
-                return Err(error);
-            }
-            remove_entry(source).map_err(|error| {
-                FileSystemError::new(FileSystemOperation::Move, source, error.to_string())
-            })
-        }
-        Err(error) => Err(FileSystemError::new(
-            FileSystemOperation::Move,
-            source,
-            error.to_string(),
-        )),
-    }
-}
-
-fn remove_entry(path: &Path) -> std::io::Result<()> {
+pub(super) fn remove_entry(path: &Path) -> std::io::Result<()> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),

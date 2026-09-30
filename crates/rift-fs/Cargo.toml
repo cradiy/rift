@@ -7,6 +7,7 @@ license = "MIT"
 [dependencies]
 dirs = "6"
 notify = "8.2.0"
+rustix = { version = "1", features = ["fs"] }
 rift-core = { path = "../rift-core" }
 trash = "5.2.9"
 

@@ -4905,6 +4905,7 @@ dependencies = [
  "dirs",
  "notify",
  "rift-core",
+ "rustix 1.1.4",
  "tempfile",
  "trash",
 ]

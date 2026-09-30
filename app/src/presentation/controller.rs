@@ -56,6 +56,16 @@ impl BrowserController {
         &self.state
     }
 
+    pub(crate) fn file_system(&self) -> Arc<dyn FileSystem> {
+        self.file_system.clone()
+    }
+
+    pub(crate) fn refresh_silently(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.state.load_state(), LoadState::Idle) {
+            self.refresh_from_directory_watch(self.directory_watch_generation, cx);
+        }
+    }
+
     pub(crate) fn selected_paths(&self) -> Vec<std::path::PathBuf> {
         self.state.selection().iter().cloned().collect()
     }

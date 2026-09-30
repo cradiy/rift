@@ -8,7 +8,7 @@ use gpui_effects::FrostedGlass;
 use rift_core::{
     application::BrowserMessage,
     domain::EntryCategory,
-    ports::{FileOperation, FileOperationResult, FileSystemError},
+    ports::{FileOperation, FileOperationResult, FileSystemError, TransferRequest},
 };
 use uic::{
     assets::LucideIcons,
@@ -20,7 +20,7 @@ use uic::{
 };
 
 use crate::{
-    presentation::{BrowserController, BrowserItem, present_browser},
+    presentation::{BrowserController, BrowserItem, present_browser, start_browser_transfer},
     ui::{
         components::{ImageThumbnail, ImageThumbnailLayout},
         theme,
@@ -504,6 +504,10 @@ impl FileBrowser {
         success_message: &'static str,
         cx: &mut App,
     ) {
+        if let Some(request) = TransferRequest::from_operation(&operation) {
+            start_browser_transfer(&controller, request, Vec::new(), cx);
+            return;
+        }
         let removed_paths = match &operation {
             FileOperation::Trash { paths } | FileOperation::PurgeTrash { paths } => {
                 Some(paths.clone())

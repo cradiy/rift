@@ -57,6 +57,7 @@ Implements the core ports with the host filesystem. It owns:
 - standard Linux user-directory discovery;
 - `/proc/self/mountinfo` parsing and removable-device discovery;
 - rename, create, recursive copy, move and collision-safe copy naming;
+- cancellable chunked transfers with byte progress and per-item reports;
 - freedesktop Trash integration and permanent deletion from Trash.
 
 It does not know about GPUI, visual components, modals or browser history.
@@ -196,6 +197,34 @@ UI action or context-menu item
   -> FileOperationResult / FileSystemError
   -> refresh BrowserMessage + toast feedback
 ```
+
+Copy and move commands use the application-wide transfer manager instead:
+
+```text
+Paste / Move / internal drop / external file drop
+  -> TransferRequest
+  -> TransferTasks (shared across tabs and windows)
+  -> dyn FileSystem::transfer (background executor)
+  -> TransferProgress / TransferReport
+  -> non-focusable glass task panel + silent directory refresh
+```
+
+Progress is published from the worker and sampled by the UI at most ten times
+per second. Directory preparation and file copying check cancellation between
+entries and 1 MiB chunks. Already completed top-level items are retained; the
+incomplete destination owned by the current transfer is removed. On Linux,
+same-device moves use an atomic no-replace rename. Cross-device moves finish
+copying before removing the source; source removal is an indivisible step with
+respect to cancellation. A source-removal or cleanup failure is reported for
+manual inspection and excluded from automatic retry.
+
+Batch failures are retained per source and do not stop unrelated items. Retry
+submits only failed, retryable sources and cancelled, unfinished sources. The
+panel can be collapsed while browsing and finished records can be dismissed.
+Successful history is bounded. Completion refreshes submitted source and target
+directories only when a participating browser still views them, preserving its
+current selection and focus. Copy collisions keep the existing copy-naming
+policy; move collisions are reported without overwriting the destination.
 
 The controller copy buffer stores source paths only for the current process.
 It is shared by every tab and any window detached from them, so a selection

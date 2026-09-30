@@ -4,6 +4,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use super::{
+    TransferCancellation, TransferFailure, TransferPhase, TransferProgress, TransferReport,
+    TransferRequest, TransferredItem,
+};
 use crate::domain::Entry;
 
 pub trait FileSystem: Send + Sync + 'static {
@@ -16,6 +20,49 @@ pub trait FileSystem: Send + Sync + 'static {
     ) -> Result<usize, FileSystemError>;
 
     fn perform(&self, operation: FileOperation) -> Result<FileOperationResult, FileSystemError>;
+
+    /// Adapters may override this to report byte progress and cancel within a
+    /// file. The default implementation cancels between top-level items.
+    fn transfer(
+        &self,
+        request: TransferRequest,
+        cancel: &TransferCancellation,
+        progress: &mut dyn FnMut(TransferProgress),
+    ) -> TransferReport {
+        let mut report = TransferReport::default();
+        for (index, source) in request.sources.iter().enumerate() {
+            if cancel.is_cancelled() {
+                report.cancelled = true;
+                report.remaining = request.sources[index..].to_vec();
+                break;
+            }
+            progress(TransferProgress {
+                phase: TransferPhase::Transferring,
+                current_path: Some(source.clone()),
+                completed_items: report.completed.len(),
+                total_items: request.sources.len(),
+                ..Default::default()
+            });
+            match self.perform(request.operation_for(vec![source.clone()])) {
+                Ok(result) => {
+                    report
+                        .completed
+                        .extend(result.affected_paths.into_iter().map(|destination| {
+                            TransferredItem {
+                                source: source.clone(),
+                                destination,
+                            }
+                        }))
+                }
+                Err(error) => report.failures.push(TransferFailure {
+                    source: source.clone(),
+                    error,
+                    retryable: true,
+                }),
+            }
+        }
+        report
+    }
 
     fn watch_directory(&self, path: &Path) -> Result<Box<dyn DirectoryWatch>, FileSystemError> {
         Err(FileSystemError::new(

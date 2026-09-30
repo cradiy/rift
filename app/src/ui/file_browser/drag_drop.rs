@@ -7,12 +7,14 @@ use gpui::{
 use rift_core::{
     application::BrowserMessage,
     domain::EntryCategory,
-    ports::{FileOperation, FileOperationResult, FileSystemError},
+    ports::{FileOperation, FileSystemError, TransferKind, TransferRequest},
 };
 use uic::{assets::LucideIcons, components::toast};
 
 use crate::{
-    presentation::{BrowserController, BrowserItem, ItemIcon, present_browser},
+    presentation::{
+        BrowserController, BrowserItem, ItemIcon, present_browser, start_browser_transfer,
+    },
     ui::components::{FolderIcon, ImageThumbnail, ImageThumbnailLayout},
 };
 
@@ -259,82 +261,20 @@ pub(crate) fn drop_files_into(
         return;
     }
 
-    let operation = if copy {
-        FileOperation::CopyInto {
+    start_browser_transfer(
+        &drag.source_controller,
+        TransferRequest {
+            kind: if copy {
+                TransferKind::Copy
+            } else {
+                TransferKind::Move
+            },
             sources: drag.paths.clone(),
-            directory: directory.clone(),
-        }
-    } else {
-        FileOperation::MoveInto {
-            sources: drag.paths.clone(),
-            directory: directory.clone(),
-        }
-    };
-    let source_controller = drag.source_controller.clone();
-    let source_id = source_controller.entity_id();
-    let target_id = target_controller.entity_id();
-    let count = drag.paths.len();
-    let moved_paths = (!copy).then(|| drag.paths.clone());
-    let selection_after_move = moved_paths.as_deref().and_then(|paths| {
-        let ordered_paths = present_browser(source_controller.read(cx).state())
-            .into_iter()
-            .map(|item| item.path)
-            .collect::<Vec<_>>();
-        successor_after_removal(&ordered_paths, paths)
-    });
-    let task = source_controller.update(cx, |controller, cx| controller.perform(operation, cx));
-
-    cx.spawn(async move |cx| {
-        let result = task.await;
-        cx.update(|cx| match result {
-            Ok(FileOperationResult { affected_paths }) => {
-                let selected = affected_paths.into_iter().next();
-                if source_id == target_id {
-                    source_controller.update(cx, |controller, cx| {
-                        if let Some(paths) = moved_paths.as_deref() {
-                            controller.forget_clipboard_paths(paths);
-                        }
-                        let current = controller.state().current_directory();
-                        let message = if current == directory {
-                            selected
-                                .map_or(BrowserMessage::Refresh, BrowserMessage::RefreshSelecting)
-                        } else {
-                            selection_after_move
-                                .map_or(BrowserMessage::Refresh, BrowserMessage::RefreshSelecting)
-                        };
-                        controller.dispatch(message, cx);
-                    });
-                } else {
-                    if !copy {
-                        source_controller.update(cx, |controller, cx| {
-                            if let Some(paths) = moved_paths.as_deref() {
-                                controller.forget_clipboard_paths(paths);
-                            }
-                            let message = selection_after_move
-                                .map_or(BrowserMessage::Refresh, BrowserMessage::RefreshSelecting);
-                            controller.dispatch(message, cx);
-                        });
-                    }
-                    target_controller.update(cx, |controller, cx| {
-                        let message = selected
-                            .map_or(BrowserMessage::Refresh, BrowserMessage::RefreshSelecting);
-                        controller.dispatch(message, cx);
-                    });
-                }
-                let action = if copy { "Copied" } else { "Moved" };
-                toast::success(
-                    if count == 1 {
-                        format!("{action} 1 item")
-                    } else {
-                        format!("{action} {count} items")
-                    },
-                    cx,
-                );
-            }
-            Err(FileSystemError { message, .. }) => toast::error(message, cx),
-        });
-    })
-    .detach();
+            directory,
+        },
+        vec![target_controller.downgrade()],
+        cx,
+    );
 }
 
 pub(crate) fn drop_external_files_into(
@@ -343,28 +283,16 @@ pub(crate) fn drop_external_files_into(
     target_controller: Entity<BrowserController>,
     cx: &mut App,
 ) {
-    let sources = paths.paths().to_vec();
-    let count = sources.len();
-    let operation = FileOperation::CopyInto { sources, directory };
-    let task = target_controller.update(cx, |controller, cx| controller.perform(operation, cx));
-
-    cx.spawn(async move |cx| {
-        let result = task.await;
-        cx.update(|cx| match result {
-            Ok(FileOperationResult { affected_paths }) => {
-                target_controller.update(cx, |controller, cx| {
-                    let message = affected_paths
-                        .into_iter()
-                        .next()
-                        .map_or(BrowserMessage::Refresh, BrowserMessage::RefreshSelecting);
-                    controller.dispatch(message, cx);
-                });
-                toast::success(item_count_message("Copied", count), cx);
-            }
-            Err(FileSystemError { message, .. }) => toast::error(message, cx),
-        });
-    })
-    .detach();
+    start_browser_transfer(
+        &target_controller,
+        TransferRequest {
+            kind: TransferKind::Copy,
+            sources: paths.paths().to_vec(),
+            directory,
+        },
+        Vec::new(),
+        cx,
+    );
 }
 
 pub(crate) fn finish_file_drag(outcome: DragEnd, drag: &FileDrag, cx: &mut App) {
